@@ -78,13 +78,19 @@ def train(config: Config, resume: bool = False):
         checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
         checkpoint_path = checkpoint_dir / "checkpoint_best.pth"
         
+        logging.info(f"Resume flag: {resume}")
+        logging.info(f"Checking for checkpoint at: {checkpoint_path}")
+        logging.info(f"Checkpoint exists: {checkpoint_path.exists()}")
+        
         if resume and checkpoint_path.exists():
             # Load checkpoint
-            logging.info(f"Loading checkpoint: {checkpoint_path}")
+            logging.info(f"Loading checkpoint from: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path, map_location=hw_manager.device)
+            logging.info(f"Checkpoint contents: {list(checkpoint.keys())}")
+            logging.info(f"Previous metrics: {checkpoint['metrics']}")
             
             # Create model without pretrained weights
-            logging.info("Initializing model from checkpoint")
+            logging.info("Creating model architecture without pretrained weights")
             model = get_model(
                 config.model.architecture,
                 pretrained=False,
@@ -93,14 +99,18 @@ def train(config: Config, resume: bool = False):
             )
             
             # Load checkpoint state
+            logging.info("Loading model state from checkpoint")
             model.load_state_dict(checkpoint['model_state_dict'])
             logging.info(f"Loaded model state from checkpoint with validation accuracy: {checkpoint['metrics'].get('accuracy', 0.0):.4f}")
             
             # Move model to device
+            logging.info(f"Moving model to device: {hw_manager.device}")
             model = model.to(hw_manager.device)
             
             # Setup optimizer and load its state
+            logging.info("Configuring optimizer")
             optimizer = model.configure_optimizers()[0]
+            logging.info("Loading optimizer state from checkpoint")
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             
             # Set training state
@@ -110,10 +120,10 @@ def train(config: Config, resume: bool = False):
             
         else:
             if resume:
-                logging.warning("No checkpoint found, starting fresh training")
+                logging.warning(f"Resume requested but no checkpoint found at {checkpoint_path}")
             
             # Create new model with pretrained weights
-            logging.info("Initializing new model with pretrained weights")
+            logging.info("Creating new model with pretrained weights")
             model = get_model(
                 config.model.architecture,
                 pretrained=config.model.pretrained,
@@ -122,9 +132,11 @@ def train(config: Config, resume: bool = False):
             )
             
             # Move model to device
+            logging.info(f"Moving model to device: {hw_manager.device}")
             model = model.to(hw_manager.device)
             
             # Setup fresh training state
+            logging.info("Initializing fresh training state")
             optimizer = model.configure_optimizers()[0]
             start_epoch = 0
             best_val_acc = 0.0
@@ -132,6 +144,7 @@ def train(config: Config, resume: bool = False):
         scheduler = None
         
         # Get dataloaders
+        logging.info("Initializing dataloaders")
         dataloaders = {
             'train': DeepfakeDataset.get_dataloader(
                 data_path=config.paths['data'],
