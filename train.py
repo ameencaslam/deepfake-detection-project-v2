@@ -89,6 +89,7 @@ def train(config: Config, resume: bool = False):
                 logging.info(f"Previous best validation accuracy: {checkpoint['metrics'].get('accuracy', 0.0):.4f}")
         
         # Get model with pretrained weights only if not resuming
+        logging.info(f"Initializing model {'from checkpoint' if resume else 'with pretrained weights' if config.model.pretrained else 'from scratch'}")
         model = get_model(
             config.model.architecture,
             pretrained=not resume and config.model.pretrained,
@@ -107,8 +108,15 @@ def train(config: Config, resume: bool = False):
         
         # Load checkpoint state if resuming
         if checkpoint is not None:
+            # Load model state
             model.load_state_dict(checkpoint['model_state_dict'])
+            logging.info("Loaded model state from checkpoint")
+            
+            # Load optimizer state
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            logging.info("Loaded optimizer state from checkpoint")
+            
+            # Load training state
             start_epoch = checkpoint['epoch'] + 1
             best_val_acc = checkpoint['metrics'].get('accuracy', 0.0)
             logging.info(f"Resuming from epoch {start_epoch} with best validation accuracy: {best_val_acc:.4f}")

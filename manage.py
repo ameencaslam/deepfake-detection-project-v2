@@ -116,13 +116,23 @@ class ProjectManager:
             # Extract files
             logger.info(f"Restoring from: {backup_file}")
             with zipfile.ZipFile(backup_file, 'r') as zip_ref:
+                # First, list all files and normalize paths
+                files_to_extract = {}
                 for file in zip_ref.namelist():
                     if file.startswith('dataset/'):
-                        target_path = Path('/content')
+                        target_path = Path('/content/dataset') / Path(file).relative_to('dataset')
                     else:
-                        target_path = self.project_path
-                    target_path.mkdir(parents=True, exist_ok=True)
-                    zip_ref.extract(file, target_path)
+                        target_path = self.project_path / file
+                    
+                    # Use the shortest path if there are duplicates
+                    norm_path = str(target_path).lower()  # Normalize for comparison
+                    if norm_path not in files_to_extract or len(file) < len(files_to_extract[norm_path][0]):
+                        files_to_extract[norm_path] = (file, target_path)
+                
+                # Extract files using the shortest paths
+                for file, target_path in files_to_extract.values():
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    zip_ref.extract(file, target_path.parent)
                     logger.info(f"Restored: {file}")
                     
             logger.info("Restore completed")

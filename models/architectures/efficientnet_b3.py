@@ -17,13 +17,20 @@ class EfficientNetModel(BaseModel):
         }
         super().__init__(config)
         
-        # Load pre-trained EfficientNet-B3
+        # Load EfficientNet-B3 without pretrained weights initially
         self.model = timm.create_model(
             'efficientnet_b3',
-            pretrained=pretrained,
+            pretrained=False,  # Always initialize without pretrained weights
             num_classes=0,  # Remove classifier
             drop_rate=dropout_rate
         )
+        
+        # Load pretrained weights if requested and not resuming from checkpoint
+        if pretrained:
+            print("Loading pretrained weights for backbone...")
+            pretrained_model = timm.create_model('efficientnet_b3', pretrained=True)
+            # Only load backbone weights, not the classifier
+            self.model.load_state_dict(pretrained_model.state_dict(), strict=False)
         
         # Get feature dimensions
         with torch.no_grad():
