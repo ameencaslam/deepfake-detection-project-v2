@@ -56,9 +56,14 @@ def main():
     # Setup
     setup_logging()
     
-    # Initialize project manager (this will restore from latest backup if available)
-    project_manager = ProjectManager(PROJECT_ROOT, use_drive=args.drive)
-    project_manager.restore()  # Restore from latest backup if available
+    # Setup Drive if needed
+    if args.drive:
+        setup_drive(args.drive)
+    
+    # Initialize project manager
+    project_manager = ProjectManager(project_path=PROJECT_ROOT, use_drive=args.drive)
+    if args.drive:
+        project_manager.restore()  # Restore from latest backup if available
     
     # Now setup paths and validate dataset (after potential restore)
     setup_paths()
@@ -83,8 +88,9 @@ def main():
         train_model(args.model, config)
         
     # Create new backup after training
-    project_manager.backup()
-    project_manager.clean()
+    if args.drive:
+        project_manager.backup()
+        project_manager.clean()
 
 if __name__ == '__main__':
     try:

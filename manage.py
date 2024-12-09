@@ -15,14 +15,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class ProjectManager:
-    def __init__(self):
-        """Initialize paths."""
-        self.project_path = Path('/content/PROJECT-V2')
-        self.drive_path = Path('/content/drive/MyDrive/deepfake-project')
+    def __init__(self, project_path: str = '/content/PROJECT-V2', use_drive: bool = True):
+        """Initialize paths.
+        
+        Args:
+            project_path: Path to project directory
+            use_drive: Whether to use Google Drive for backup
+        """
+        self.project_path = Path(project_path)
+        self.use_drive = use_drive
+        self.drive_path = Path('/content/drive/MyDrive/deepfake-project') if use_drive else None
         
     def backup(self):
         """Backup essential files to Drive."""
         try:
+            # Skip if Drive is not enabled
+            if not self.use_drive:
+                logger.info("Drive backup disabled, skipping backup")
+                return
+                
             # Check Drive
             if not os.path.exists('/content/drive/MyDrive'):
                 raise RuntimeError("Google Drive is not mounted")
@@ -80,6 +91,11 @@ class ProjectManager:
     def restore(self):
         """Restore from latest backup."""
         try:
+            # Skip if Drive is not enabled
+            if not self.use_drive:
+                logger.info("Drive backup disabled, skipping restore")
+                return
+                
             # Check Drive
             if not os.path.exists('/content/drive/MyDrive'):
                 raise RuntimeError("Google Drive is not mounted")
