@@ -57,10 +57,12 @@ def train(config: Config):
         # Initialize progress tracking
         progress = ProgressTracker(
             num_epochs=config.training.num_epochs,
-            num_batches=len(dataloaders['train'])
+            num_batches=len(dataloaders['train']),
+            hardware_manager=hw_manager
         )
         
         # Training loop
+        best_val_acc = 0.0
         for epoch in range(config.training.num_epochs):
             # Training phase
             model.train()
@@ -127,6 +129,7 @@ def train(config: Config):
                 config.paths['checkpoints'],
                 config.model.architecture
             )
+            os.makedirs(checkpoint_dir, exist_ok=True)
             
             # Save latest checkpoint
             latest_path = os.path.join(
@@ -136,8 +139,8 @@ def train(config: Config):
             save_checkpoint(model, latest_path, epoch, optimizer, scheduler, val_metrics)
             
             # Save best checkpoint if needed
-            if val_metrics['accuracy'] > progress.best_val_acc:
-                progress.best_val_acc = val_metrics['accuracy']
+            if val_metrics['accuracy'] > best_val_acc:
+                best_val_acc = val_metrics['accuracy']
                 best_path = os.path.join(
                     checkpoint_dir,
                     f"checkpoint_best.pth"
