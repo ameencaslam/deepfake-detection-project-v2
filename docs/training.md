@@ -1,20 +1,37 @@
 # Training and Evaluation Guide
 
-## Training
+## Training Scripts
 
-### Basic Usage
+### main.py (High-Level Interface)
+
+For quick training and multiple model management:
 
 ```bash
-# Train a model
-python train.py --model efficientnet --data_path /path/to/data
+# Train all models
+python main.py --model all
 
-# Resume training
-python train.py --model efficientnet --resume path/to/checkpoint.pth
+# Train single model with Drive backup
+python main.py --model efficientnet --drive True
+
+# Custom batch size
+python main.py --model swin --batch 64
 ```
 
-### Advanced Options
+Available arguments:
+
+- `--model`: Model to train ('all' or specific model name)
+- `--drive`: Use Google Drive backup (default: True)
+- `--batch`: Batch size (default: 32)
+
+### train.py (Detailed Control)
+
+For fine-grained control over training:
 
 ```bash
+# Basic training
+python train.py --model efficientnet --data_path /path/to/data
+
+# Advanced options
 python train.py \
     --model efficientnet \
     --data_path /path/to/data \
@@ -25,6 +42,36 @@ python train.py \
     --label_smoothing 0.1 \
     --weight_decay 0.01
 ```
+
+## Script Relationships
+
+- `main.py` calls `train.py` internally
+- `main.py` handles project-wide settings
+- `train.py` handles detailed training logic
+- Both can be used independently
+
+## Training Features
+
+### 1. Optimization
+
+- Mixed precision training
+- Layer-wise learning rates
+- One-cycle learning rate policy
+- Weight decay with AdamW
+
+### 2. Regularization
+
+- Label smoothing
+- Dropout
+- Layer normalization
+- Stochastic depth (model specific)
+
+### 3. Monitoring
+
+- Training loss
+- Validation metrics
+- Learning rate schedule
+- Memory usage
 
 ## Evaluation
 
@@ -50,46 +97,6 @@ python evaluate.py \
     --batch_size 32
 ```
 
-## Training Features
-
-### 1. Optimization
-
-- Mixed precision training
-- Layer-wise learning rates
-- One-cycle learning rate policy
-- Weight decay with AdamW
-
-### 2. Regularization
-
-- Label smoothing
-- Dropout
-- Layer normalization
-- Stochastic depth (model specific)
-
-### 3. Monitoring
-
-- Training loss
-- Validation metrics
-- Learning rate schedule
-- Memory usage
-
-## Evaluation Metrics
-
-### 1. Classification Metrics
-
-- Accuracy
-- Precision
-- Recall
-- F1 Score
-- AUC-ROC
-
-### 2. Detailed Analysis
-
-- Confusion matrix
-- True/False positives
-- True/False negatives
-- Total samples processed
-
 ## Model-Specific Training
 
 ### EfficientNet
@@ -112,9 +119,16 @@ python train.py \
 
 ## Best Practices
 
-### Training
+### Using main.py
 
-1. Start with default hyperparameters
+1. Start with `main.py` for quick experiments
+2. Use `--model all` to train all models
+3. Enable Drive backup for important runs
+4. Adjust batch size if needed
+
+### Using train.py
+
+1. Use for detailed parameter control
 2. Monitor validation metrics
 3. Use appropriate batch size
 4. Enable mixed precision training
@@ -144,7 +158,10 @@ python train.py \
 ## Getting Help
 
 ```bash
-# View training options
+# View high-level options
+python main.py --help
+
+# View detailed training options
 python train.py --help
 
 # View evaluation options
