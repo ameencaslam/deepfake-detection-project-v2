@@ -74,34 +74,45 @@ def train(config: Config, resume: bool = False):
         results_path = Path(config.paths['results']) / config.model.architecture
         visualizer = TrainingVisualizer(results_path)
         
-        # Check for checkpoint if resuming
-        checkpoint = None
-        if resume:
-            checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
-            checkpoints = list(checkpoint_dir.glob("checkpoint_best.pth"))
-            if not checkpoints:
-                logging.warning("No checkpoint found for resuming, starting fresh")
-                resume = False
-            else:
-                latest_checkpoint = max(checkpoints, key=lambda x: x.stat().st_mtime)
-                logging.info(f"Loading checkpoint: {latest_checkpoint}")
-                checkpoint = torch.load(latest_checkpoint, map_location=hw_manager.device)
-                logging.info(f"Previous best validation accuracy: {checkpoint['metrics'].get('accuracy', 0.0):.4f}")
+        # Check for checkpoint
+        checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
+        checkpoint_path = checkpoint_dir / "checkpoint_best.pth"
         
-        # Initialize model
-        if resume and checkpoint is not None:
-            logging.info("Initializing model from checkpoint")
+        if resume and checkpoint_path.exists():
+            # Load checkpoint
+            logging.info(f"Loading checkpoint: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=hw_manager.device)
+            
             # Create model without pretrained weights
+            logging.info("Initializing model from checkpoint")
             model = get_model(
                 config.model.architecture,
                 pretrained=False,
                 num_classes=config.model.num_classes,
                 dropout_rate=config.model.dropout_rate
             )
+            
             # Load checkpoint state
             model.load_state_dict(checkpoint['model_state_dict'])
-            logging.info("Loaded model state from checkpoint")
+            logging.info(f"Loaded model state from checkpoint with validation accuracy: {checkpoint['metrics'].get('accuracy', 0.0):.4f}")
+            
+            # Move model to device
+            model = model.to(hw_manager.device)
+            
+            # Setup optimizer and load its state
+            optimizer = model.configure_optimizers()[0]
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            
+            # Set training state
+            start_epoch = checkpoint['epoch'] + 1
+            best_val_acc = checkpoint['metrics'].get('accuracy', 0.0)
+            logging.info(f"Resuming from epoch {start_epoch} with best validation accuracy: {best_val_acc:.4f}")
+            
         else:
+            if resume:
+                logging.warning("No checkpoint found, starting fresh training")
+            
+            # Create new model with pretrained weights
             logging.info("Initializing new model with pretrained weights")
             model = get_model(
                 config.model.architecture,
@@ -109,22 +120,16 @@ def train(config: Config, resume: bool = False):
                 num_classes=config.model.num_classes,
                 dropout_rate=config.model.dropout_rate
             )
-        
-        # Move model to device
-        model = model.to(hw_manager.device)
-        
-        # Setup training components
-        optimizer = model.configure_optimizers()[0]
+            
+            # Move model to device
+            model = model.to(hw_manager.device)
+            
+            # Setup fresh training state
+            optimizer = model.configure_optimizers()[0]
+            start_epoch = 0
+            best_val_acc = 0.0
+            
         scheduler = None
-        start_epoch = 0
-        best_val_acc = 0.0
-        
-        # Load optimizer state if resuming
-        if resume and checkpoint is not None:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            start_epoch = checkpoint['epoch'] + 1
-            best_val_acc = checkpoint['metrics'].get('accuracy', 0.0)
-            logging.info(f"Resuming from epoch {start_epoch} with best validation accuracy: {best_val_acc:.4f}")
         
         # Get dataloaders
         dataloaders = {
