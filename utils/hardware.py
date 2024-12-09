@@ -14,9 +14,25 @@ class HardwareStats:
     ram_used: float = 0.0
     ram_total: float = 0.0
 
+def get_device() -> str:
+    """Get the device to use for training (cuda or cpu)."""
+    if torch.cuda.is_available():
+        return 'cuda'
+    return 'cpu'
+
 class HardwareManager:
     def __init__(self):
-        self.device = self._get_device()
+        """Initialize hardware manager."""
+        self.device = get_device()
+        self.gpu_available = torch.cuda.is_available()
+        
+        if self.gpu_available:
+            self.gpu_name = torch.cuda.get_device_name(0)
+            self.gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9  # Convert to GB
+        else:
+            self.gpu_name = None
+            self.gpu_memory_total = None
+        
         self.mixed_precision = self._setup_mixed_precision()
         self._setup_memory_optimization()
         

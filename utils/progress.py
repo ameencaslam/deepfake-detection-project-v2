@@ -18,118 +18,112 @@ class TrainingMetrics:
     best_epoch: int = 0
 
 class ProgressTracker:
-    def __init__(self, num_epochs: int, num_batches: int, hardware_manager: HardwareManager):
+    def __init__(self, num_epochs: int, num_batches: int, hardware_manager=None):
+        """Initialize progress tracker."""
         self.num_epochs = num_epochs
         self.num_batches = num_batches
         self.hardware_manager = hardware_manager
-        self.metrics = TrainingMetrics()
-        self.epoch_times = []
+        self.best_val_acc = 0.0
+        self.best_val_loss = float('inf')
+        self.best_epoch = 0
+        self.current_epoch = 0
+        self.epoch_start_time = None
+        self.training_start_time = time.time()
         
-    def new_epoch(self, epoch: int) -> tqdm:
-        """Initialize a new epoch progress bar."""
+        # Initialize metrics
+        self.reset_metrics()
+        
+    def reset_metrics(self):
+        """Reset running metrics for new epoch."""
+        self.running_loss = 0.0
+        self.running_acc = 0.0
+        self.count = 0
+        
+    def new_epoch(self, epoch: int):
+        """Start tracking new epoch."""
         self.current_epoch = epoch
         self.epoch_start_time = time.time()
+        self.reset_metrics()
         
-        # Create epoch progress bar
-        return tqdm(total=self.num_batches,
-                   desc=f"Epoch [{epoch+1}/{self.num_epochs}]",
-                   bar_format='{desc}: {percentage:3.0f}%|{bar:30}{r_bar}')
-                   
-    def update_batch(self, batch_idx: int, loss: float, acc: float, pbar: tqdm):
-        """Update batch progress."""
-        pbar.update(1)
-        self.metrics.train_loss = loss
-        self.metrics.train_acc = acc
+        # Create progress bar
+        return tqdm(
+            total=self.num_batches,
+            desc=f"Epoch [{epoch+1}/{self.num_epochs}]",
+            unit='batch',
+            dynamic_ncols=True,
+            leave=True  # Keep the progress bar after completion
+        )
         
-        # Update progress bar description with metrics
+    def update_batch(self, batch_idx: int, loss: float, accuracy: float, pbar):
+        """Update metrics for current batch."""
+        self.running_loss += loss
+        self.running_acc += accuracy
+        self.count += 1
+        
+        # Update progress bar
+        avg_loss = self.running_loss / self.count
+        avg_acc = self.running_acc / self.count
+        
         pbar.set_postfix({
-            'loss': f"{loss:.4f}",
-            'acc': f"{acc*100:.2f}%"
+            'loss': f"{avg_loss:.4f}",
+            'acc': f"{avg_acc:.2%}"
         })
+        pbar.update(1)
         
     def end_epoch(self, val_metrics: Dict[str, float]):
-        """Process end of epoch and display metrics."""
+        """End epoch and display summary."""
         epoch_time = time.time() - self.epoch_start_time
-        self.epoch_times.append(epoch_time)
-        
-        # Update validation metrics
-        self.metrics.val_loss = val_metrics['loss']
-        self.metrics.val_acc = val_metrics['accuracy']
+        avg_train_loss = self.running_loss / self.count
+        avg_train_acc = self.running_acc / self.count
         
         # Update best metrics
-        if self.metrics.val_loss < self.metrics.best_val_loss:
-            self.metrics.best_val_loss = self.metrics.val_loss
-            self.metrics.best_val_acc = self.metrics.val_acc
-            self.metrics.best_epoch = self.current_epoch
+        val_acc = val_metrics['accuracy']
+        val_loss = val_metrics['loss']
+        if val_acc > self.best_val_acc:
+            self.best_val_acc = val_acc
+            self.best_val_loss = val_loss
+            self.best_epoch = self.current_epoch
             
-        self._display_epoch_summary()
-        
-    def _display_epoch_summary(self):
-        """Display detailed epoch summary."""
-        # Get hardware stats
-        hw_stats = self.hardware_manager.get_hardware_stats()
-        
-        # Calculate time estimates
-        avg_epoch_time = sum(self.epoch_times) / len(self.epoch_times)
+        # Calculate time statistics
+        elapsed_time = time.time() - self.training_start_time
         remaining_epochs = self.num_epochs - (self.current_epoch + 1)
-        estimated_time = avg_epoch_time * remaining_epochs
+        estimated_remaining = (elapsed_time / (self.current_epoch + 1)) * remaining_epochs
         
+        # Display epoch summary
         print("\nEpoch Summary:")
         print("├── Training Metrics:")
-        print(f"│   ├── Loss: {self.metrics.train_loss:.4f}")
-        print(f"│   └── Accuracy: {self.metrics.train_acc*100:.2f}%")
+        print(f"│   ├── Loss: {avg_train_loss:.4f}")
+        print(f"│   └── Accuracy: {avg_train_acc:.2%}")
         print("├── Validation Metrics:")
-        print(f"│   ├── Loss: {self.metrics.val_loss:.4f}")
-        print(f"│   └── Accuracy: {self.metrics.val_acc*100:.2f}%")
+        print(f"│   ├── Loss: {val_loss:.4f}")
+        print(f"│   └── Accuracy: {val_acc:.2%}")
         print("├── Best Model:")
-        print(f"│   ├── Epoch: {self.metrics.best_epoch + 1}")
-        print(f"│   ├── Val Loss: {self.metrics.best_val_loss:.4f}")
-        print(f"│   └── Val Accuracy: {self.metrics.best_val_acc*100:.2f}%")
-        
-        if hw_stats.gpu_utilization is not None:
-            print("├── Hardware Usage:")
-            print(f"│   ├── GPU: {hw_stats.gpu_utilization:.1f}%")
-            print(f"│   ├── GPU Memory: {hw_stats.gpu_memory_used:.1f}GB/{hw_stats.gpu_memory_total:.1f}GB")
-            print(f"│   └── RAM: {hw_stats.ram_used:.1f}GB/{hw_stats.ram_total:.1f}GB")
-            
+        print(f"│   ├── Epoch: {self.best_epoch + 1}")
+        print(f"│   ├── Val Loss: {self.best_val_loss:.4f}")
+        print(f"│   └── Val Accuracy: {self.best_val_acc:.2%}")
         print("└── Time Statistics:")
-        print(f"    ├── Epoch Time: {avg_epoch_time:.1f}s")
-        print(f"    └── Estimated Remaining: {estimated_time/3600:.1f}h")
-        print()
-        
-    def get_current_metrics(self) -> Dict[str, float]:
-        """Get current training metrics."""
-        return {
-            'train_loss': self.metrics.train_loss,
-            'train_acc': self.metrics.train_acc,
-            'val_loss': self.metrics.val_loss,
-            'val_acc': self.metrics.val_acc,
-            'best_val_loss': self.metrics.best_val_loss,
-            'best_val_acc': self.metrics.best_val_acc,
-        }
+        print(f"    ├── Epoch Time: {epoch_time:.1f}s")
+        print(f"    └── Estimated Remaining: {estimated_remaining/3600:.1f}h")
+        print("\n")
 
 class TrainingController:
     def __init__(self):
-        self.stop_next_epoch = False
-        self._create_stop_button()
-        
-    def _create_stop_button(self):
-        """Create and display stop button widget."""
-        self.stop_button = widgets.Button(
+        """Initialize training controller with stop button."""
+        self._should_stop = False
+        self.button = widgets.Button(
             description='Stop Training',
             button_style='danger',
             layout=widgets.Layout(width='150px', height='40px')
         )
-        self.stop_button.on_click(lambda b: self.request_stop())
-        display(self.stop_button)
+        self.button.on_click(self._stop_clicked)
+        display(self.button)
         
-    def request_stop(self):
-        """Request training to stop after current epoch."""
-        self.stop_next_epoch = True
-        self.stop_button.description = 'Stopping...'
-        self.stop_button.disabled = True
-        print("\nTraining will stop after current epoch...")
+    def _stop_clicked(self, _):
+        """Handle stop button click."""
+        self._should_stop = True
+        self.button.description = 'Stopping...'
+        self.button.disabled = True
         
     def should_stop(self) -> bool:
         """Check if training should stop."""
-        return self.stop_next_epoch 
+        return self._should_stop

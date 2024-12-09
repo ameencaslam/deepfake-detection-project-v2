@@ -74,9 +74,15 @@ def train(config: Config):
                 
             # Training phase
             model.train()
-            pbar = progress.new_epoch(epoch)
+            progress_bar = progress.new_epoch(epoch)
             
             for batch_idx, (images, labels) in enumerate(dataloaders['train']):
+                # Check if training should stop
+                if controller.should_stop():
+                    print("\nStopping training as requested...")
+                    progress_bar.close()
+                    return
+                    
                 images = images.to(hw_manager.device)
                 labels = labels.to(hw_manager.device)
                 
@@ -92,15 +98,17 @@ def train(config: Config):
                 else:
                     metrics['loss'].backward()
                     optimizer.step()
-                    
+                
                 # Update progress
                 progress.update_batch(
                     batch_idx,
                     metrics['loss'].item(),
                     metrics['accuracy'].item(),
-                    pbar
+                    progress_bar
                 )
-                
+            
+            progress_bar.close()
+            
             # Validation phase
             model.eval()
             val_metrics = {

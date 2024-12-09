@@ -7,7 +7,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc
 
 from models.model_registry import get_model, MODEL_REGISTRY
 from utils.dataset import DeepfakeDataset
-from utils.hardware import get_device
+from utils.hardware import HardwareManager
 from config.paths import get_checkpoint_dir, get_data_dir
 from config.base_config import BaseConfig
 
@@ -15,7 +15,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Evaluate deepfake detection model')
     
     # Get default paths from config
-    default_data = str(get_data_dir() / 'test')
+    default_data = get_data_dir()
     default_checkpoint_dir = get_checkpoint_dir()
     
     # Basic arguments with defaults
@@ -26,13 +26,8 @@ def parse_args():
                        help='Path to model checkpoint. If not specified, will use latest from checkpoint directory')
     parser.add_argument('--data_path', type=str, default=default_data,
                        help='Path to test data')
-    parser.add_argument('--batch_size', type=int, default=BaseConfig.batch_size,
+    parser.add_argument('--batch_size', type=int, default=32,
                        help='Batch size for evaluation')
-    
-    # Add model specific arguments
-    temp_args, _ = parser.parse_known_args()
-    model_cls = get_model(temp_args.model)
-    parser = model_cls.add_model_specific_args(parser)
     
     args = parser.parse_args()
     
@@ -110,13 +105,16 @@ def compute_metrics(predictions, labels, probabilities):
 
 def main():
     args = parse_args()
-    device = get_device()
+    
+    # Initialize hardware
+    hw_manager = HardwareManager()
+    hw_manager.print_hardware_info()
     
     # Load model
     model = get_model(args.model)
-    checkpoint = torch.load(args.checkpoint, map_location=device)
+    checkpoint = torch.load(args.checkpoint, map_location=hw_manager.device)
     model.load_state_dict(checkpoint['model_state_dict'])
-    model = model.to(device)
+    model = model.to(hw_manager.device)
     
     print(f"\nEvaluating {args.model} model")
     print(f"Checkpoint: {args.checkpoint}")
@@ -133,7 +131,7 @@ def main():
     )
     
     # Evaluate
-    predictions, labels, probabilities = evaluate(model, test_loader, device)
+    predictions, labels, probabilities = evaluate(model, test_loader, hw_manager.device)
     metrics = compute_metrics(predictions, labels, probabilities)
     
     # Print detailed results
