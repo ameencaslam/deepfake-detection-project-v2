@@ -101,21 +101,22 @@ def train(config: Config, resume: bool = False):
         # Initialize progress tracker
         progress = ProgressTracker(
             num_epochs=config.training.num_epochs,
-            steps_per_epoch=len(dataloaders['train'])
+            num_batches=len(dataloaders['train']),
+            hardware_manager=hw_manager
         )
         
         # Training loop
         for epoch in range(start_epoch, config.training.num_epochs):
-            if controller.should_stop:
+            if controller.should_stop():
                 logging.info("Training stopped by user")
                 break
                 
             model.train()
-            progress.start_epoch(epoch)
+            progress_bar = progress.new_epoch(epoch)
             
             # Training phase
             for batch in dataloaders['train']:
-                if controller.should_stop:
+                if controller.should_stop():
                     break
                     
                 images, labels = batch
@@ -136,7 +137,12 @@ def train(config: Config, resume: bool = False):
                 accuracy = (predicted == labels).float().mean()
                 
                 # Update progress
-                progress.update(loss=loss.item(), accuracy=accuracy.item())
+                progress.update_batch(
+                    batch_idx=progress_bar.n,
+                    loss=loss.item(),
+                    accuracy=accuracy.item(),
+                    pbar=progress_bar
+                )
             
             # End training phase
             progress_bar.close()
