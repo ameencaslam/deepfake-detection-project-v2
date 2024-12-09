@@ -4,7 +4,7 @@ import argparse
 from utils.dataset import DeepfakeDataset
 from utils.hardware import HardwareManager
 from utils.progress import ProgressTracker, TrainingController
-from utils.backup import ProjectBackup
+from manage import ProjectManager
 from config.base_config import Config
 from models.architectures import get_model
 from typing import Dict, Any
@@ -15,7 +15,6 @@ import numpy as np
 from utils.visualization import TrainingVisualizer
 import glob
 from typing import Optional
-from utils.project_manager import ProjectManager
 
 def save_checkpoint(model, checkpoint_path, epoch, optimizer, scheduler, metrics):
     """Save model checkpoint."""

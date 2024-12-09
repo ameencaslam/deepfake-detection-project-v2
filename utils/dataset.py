@@ -196,14 +196,13 @@ class DeepfakeDataset(Dataset):
         with open(save_path, 'w') as f:
             json.dump(split_info, f, indent=4)
             
-        # Try to backup to Drive if backup manager is available
+        # Try to backup using project manager
         try:
-            from .backup import ProjectBackup
-            backup_manager = ProjectBackup(os.path.dirname(save_path))
-            if backup_manager.use_drive:
-                backup_manager.backup_to_drive(save_path, 'dataset_info')
+            from manage import ProjectManager
+            project_manager = ProjectManager()
+            project_manager.backup()  # This will include the split info file
         except Exception as e:
-            print(f"Note: Could not backup split info to Drive: {str(e)}")
+            print(f"Note: Could not backup split info: {str(e)}")
             
     @staticmethod
     def create_dataloaders(data_dir: str,
