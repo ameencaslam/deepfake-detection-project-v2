@@ -221,10 +221,16 @@ def main():
                        help='Whether to use Google Drive for saving checkpoints')
     parser.add_argument('--resume', action='store_true',
                        help='Resume training from latest checkpoint')
+    parser.add_argument('--epochs', type=int, default=None,
+                       help='Number of epochs (default: use config value)')
     args = parser.parse_args()
     
     # Initialize config
     config = Config(base_path=args.base_path, use_drive=args.use_drive)
+    
+    # Update number of epochs if provided
+    if args.epochs is not None:
+        config.training.num_epochs = args.epochs
     
     # Create experiment directory
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

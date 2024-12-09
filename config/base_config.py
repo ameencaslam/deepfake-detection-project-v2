@@ -10,7 +10,7 @@ from .paths import (
 @dataclass
 class TrainingConfig:
     batch_size: int = 64
-    num_epochs: int = 5
+    num_epochs: int = 10
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
 

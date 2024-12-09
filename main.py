@@ -51,6 +51,10 @@ def main():
                        help='Use Google Drive for backup')
     parser.add_argument('--batch', type=int, default=32,
                        help='Batch size')
+    parser.add_argument('--epochs', type=int, default=None,
+                       help='Number of epochs (default: use config value)')
+    parser.add_argument('--resume', action='store_true',
+                       help='Resume from latest checkpoint')
     args = parser.parse_args()
 
     # Setup
@@ -83,6 +87,10 @@ def main():
     # Update batch size if provided
     if args.batch != 32:
         config.training.batch_size = args.batch
+        
+    # Update number of epochs if provided
+    if args.epochs is not None:
+        config.training.num_epochs = args.epochs
 
     # Train models
     if args.model.lower() == 'all':
