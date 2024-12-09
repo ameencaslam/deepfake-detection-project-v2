@@ -11,12 +11,25 @@ from typing import Dict, Any
 import json
 from datetime import datetime
 
+def save_checkpoint(model, checkpoint_path, epoch, optimizer, scheduler, metrics):
+    """Save model checkpoint."""
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+    
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'metrics': metrics
+    }
+    
+    if scheduler is not None:
+        checkpoint['scheduler_state_dict'] = scheduler.state_dict()
+        
+    torch.save(checkpoint, checkpoint_path)
+
 def train(config: Config):
     # Initialize backup system
     backup_manager = ProjectBackup(config.base_path, config.use_drive)
-    
-    # Try to restore from backup if exists
-    backup_manager.restore_from_backup()
     
     try:
         # Initialize hardware
@@ -44,12 +57,8 @@ def train(config: Config):
         # Initialize progress tracking
         progress = ProgressTracker(
             num_epochs=config.training.num_epochs,
-            num_batches=len(dataloaders['train']),
-            hardware_manager=hw_manager
+            num_batches=len(dataloaders['train'])
         )
-        
-        # Initialize training controller
-        controller = TrainingController()
         
         # Training loop
         for epoch in range(config.training.num_epochs):
@@ -58,12 +67,15 @@ def train(config: Config):
             pbar = progress.new_epoch(epoch)
             
             for batch_idx, (images, labels) in enumerate(dataloaders['train']):
+                images = images.to(hw_manager.device)
+                labels = labels.to(hw_manager.device)
+                
                 # Training step
                 metrics = model.training_step((images, labels))
                 
                 # Optimizer step with gradient scaling for mixed precision
                 optimizer.zero_grad()
-                if model.scaler:
+                if hasattr(model, 'scaler') and model.scaler:
                     model.scaler.scale(metrics['loss']).backward()
                     model.scaler.step(optimizer)
                     model.scaler.update()
@@ -89,6 +101,8 @@ def train(config: Config):
             
             with torch.no_grad():
                 for images, labels in dataloaders['val']:
+                    images = images.to(hw_manager.device)
+                    labels = labels.to(hw_manager.device)
                     batch_metrics = model.validation_step((images, labels))
                     val_metrics['loss'] += batch_metrics['loss'].item() * images.size(0)
                     val_metrics['accuracy'] += batch_metrics['accuracy'].item() * images.size(0)
@@ -100,46 +114,44 @@ def train(config: Config):
             
             # Update learning rate
             if scheduler is not None:
-                scheduler.step(val_metrics['loss'])
+                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    scheduler.step(val_metrics['loss'])
+                else:
+                    scheduler.step()
                 
             # End epoch and display metrics
             progress.end_epoch(val_metrics)
             
             # Save checkpoint
-            checkpoint_path = os.path.join(
-                config.paths['models'],
-                f"{config.model.architecture}_epoch_{epoch+1}.pth"
-            )
-            model.save_checkpoint(
-                checkpoint_path,
-                epoch,
-                optimizer,
-                scheduler,
-                val_metrics
+            checkpoint_dir = os.path.join(
+                config.paths['checkpoints'],
+                config.model.architecture
             )
             
-            # Backup checkpoint to Drive
-            if val_metrics['accuracy'] > progress.metrics.best_val_acc:
-                best_checkpoint_path = os.path.join(
-                    config.paths['models'],
-                    f"{config.model.architecture}_best.pth"
+            # Save latest checkpoint
+            latest_path = os.path.join(
+                checkpoint_dir,
+                f"checkpoint_latest.pth"
+            )
+            save_checkpoint(model, latest_path, epoch, optimizer, scheduler, val_metrics)
+            
+            # Save best checkpoint if needed
+            if val_metrics['accuracy'] > progress.best_val_acc:
+                progress.best_val_acc = val_metrics['accuracy']
+                best_path = os.path.join(
+                    checkpoint_dir,
+                    f"checkpoint_best.pth"
                 )
-                model.save_checkpoint(
-                    best_checkpoint_path,
-                    epoch,
-                    optimizer,
-                    scheduler,
-                    val_metrics
+                save_checkpoint(model, best_path, epoch, optimizer, scheduler, val_metrics)
+                backup_manager.backup_to_drive(
+                    best_path, 
+                    'checkpoints',
+                    model_name=config.model.architecture
                 )
-                backup_manager.backup_to_drive(best_checkpoint_path, 'checkpoints')
-                
-            # Check if training should stop
-            if controller.should_stop():
-                print("Training stopped by user")
-                break
                 
             # Memory optimization
-            hw_manager.optimize_memory()
+            if hasattr(hw_manager, 'optimize_memory'):
+                hw_manager.optimize_memory()
             
     except Exception as e:
         print(f"Error during training: {str(e)}")
@@ -150,7 +162,7 @@ def train(config: Config):
         print("Creating final backup...")
         backup_manager.create_backup(include_checkpoints=True)
         backup_manager.clean_old_backups(keep_last=3)
-        
+
 def main():
     parser = argparse.ArgumentParser(description='Train Deepfake Detection Model')
     parser.add_argument('--base_path', type=str, required=True,

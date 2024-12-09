@@ -153,6 +153,10 @@ class DeepfakeDataset(Dataset):
                 seed=seed
             )
             
+        # Save split info
+        split_info_path = os.path.join(data_dir, 'split_info.json')
+        datasets['train'].save_split_info(split_info_path)
+        
         # Create dataloaders
         dataloaders = {}
         for split in ['train', 'val', 'test']:

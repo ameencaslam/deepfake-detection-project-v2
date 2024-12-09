@@ -35,8 +35,9 @@ def train_model(model_name: str, config: Config):
 def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='Train deepfake detection models')
-    parser.add_argument('--model', type=str, default='all',
-                       help='Model to train (swin/two_stream/xception/cnn_transformer/cross_attention/all)')
+    parser.add_argument('--model', type=str, default='efficientnet',
+                       choices=list(MODELS.keys()) + ['all'],
+                       help=f'Model to train: {", ".join(list(MODELS.keys()) + ["all"])}')
     parser.add_argument('--drive', type=bool, default=True,
                        help='Use Google Drive for backup')
     parser.add_argument('--batch', type=int, default=32,
@@ -61,11 +62,11 @@ def main():
 
     # Train models
     if args.model.lower() == 'all':
-        for model_key in MODELS:
-            train_model(MODELS[model_key], config)
+        for model_name in MODELS.keys():
+            if model_name != 'all':
+                train_model(model_name, config)
     else:
-        model_name = get_model_name(args.model.lower())
-        train_model(model_name, config)
+        train_model(args.model, config)
 
 if __name__ == '__main__':
     try:
@@ -74,4 +75,4 @@ if __name__ == '__main__':
         logging.info("\nTraining interrupted by user")
     except Exception as e:
         logging.error(f"\nError during training: {str(e)}")
-        raise 
+        raise

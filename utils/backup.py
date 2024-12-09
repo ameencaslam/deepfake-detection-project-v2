@@ -8,12 +8,13 @@ from pathlib import Path
 import logging
 from google.colab import drive
 import glob
+from config.paths import DRIVE_PATH
 
 class ProjectBackup:
     def __init__(self, base_path: str, use_drive: bool = True):
         self.base_path = Path(base_path)
         self.use_drive = use_drive
-        self.drive_path = Path('/content/drive/MyDrive/deepfake_project')
+        self.drive_path = Path(DRIVE_PATH)
         
         # Setup logging
         logging.basicConfig(level=logging.INFO)
@@ -47,30 +48,31 @@ class ProjectBackup:
             files['code'].append(str(py_file))
             
         # Latest and best checkpoints
-        checkpoint_path = self.base_path / 'models' / 'checkpoints'
+        checkpoint_path = self.base_path / 'checkpoints'
         if checkpoint_path.exists():
-            for model_type in ['latest', 'best']:
-                checkpoints = list(checkpoint_path.glob(f"*{model_type}*.pth"))
-                if checkpoints:
-                    files['checkpoints'].extend([str(cp) for cp in checkpoints])
-                    
+            for model_dir in checkpoint_path.iterdir():
+                if model_dir.is_dir():
+                    for model_type in ['latest', 'best']:
+                        checkpoints = list(model_dir.glob(f"*{model_type}*.pth"))
+                        if checkpoints:
+                            files['checkpoints'].extend([str(cp) for cp in checkpoints])
+                
         # Config files
         for config_file in self.base_path.rglob("*.json"):
-            if 'configs' in str(config_file):
-                files['configs'].append(str(config_file))
-                
+            files['configs'].append(str(config_file))
+            
         # Log files
         log_path = self.base_path / 'logs'
         if log_path.exists():
             for log_file in log_path.glob("*.log"):
                 files['logs'].append(str(log_file))
-                
+            
         # Results
         results_path = self.base_path / 'results'
         if results_path.exists():
             for result_file in results_path.rglob("*.*"):
                 files['results'].append(str(result_file))
-                
+            
         return files
         
     def create_backup(self, include_checkpoints: bool = True) -> str:
@@ -161,13 +163,15 @@ class ProjectBackup:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
                 
-    def backup_to_drive(self, file_path: str, category: str):
+    def backup_to_drive(self, file_path: str, category: str, model_name: Optional[str] = None):
         """Backup specific file to Drive."""
         if not self.use_drive:
             return
             
         drive_category_path = self.drive_path / category
-        drive_category_path.mkdir(exist_ok=True)
+        if model_name:
+            drive_category_path = drive_category_path / model_name
+        drive_category_path.mkdir(parents=True, exist_ok=True)
         
         filename = os.path.basename(file_path)
         drive_path = drive_category_path / filename
@@ -188,10 +192,23 @@ class ProjectBackup:
             
         # Clean Drive backups
         if self.use_drive and self.drive_path.exists():
+            # Clean general backups
             drive_backups = sorted(
                 self.drive_path.glob("deepfake_project_backup_*.zip"),
                 key=os.path.getctime
             )
             
             for backup in drive_backups[:-keep_last]:
-                backup.unlink() 
+                backup.unlink()
+                
+            # Clean model-specific checkpoints
+            checkpoint_path = self.drive_path / 'checkpoints'
+            if checkpoint_path.exists():
+                for model_dir in checkpoint_path.iterdir():
+                    if model_dir.is_dir():
+                        model_checkpoints = sorted(
+                            model_dir.glob("*.pth"),
+                            key=os.path.getctime
+                        )
+                        for checkpoint in model_checkpoints[:-keep_last]:
+                            checkpoint.unlink() 
