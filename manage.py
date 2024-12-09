@@ -119,15 +119,25 @@ class ProjectManager:
                 # First, list all files and clean paths
                 files_to_extract = {}
                 for file in zip_ref.namelist():
-                    # Clean up path by removing any duplicate directory patterns
-                    parts = Path(file).parts
+                    # Clean up path by removing duplicate patterns
+                    path_parts = Path(file).parts
+                    
+                    # Remove duplicate directory patterns
                     cleaned_parts = []
-                    seen = set()
-                    for part in parts:
-                        if part not in seen:
+                    seen_patterns = set()
+                    for part in path_parts:
+                        # Check if this part is a repeating directory pattern
+                        is_duplicate = False
+                        for seen in seen_patterns:
+                            if part in seen or seen in part:
+                                is_duplicate = True
+                                break
+                        if not is_duplicate:
                             cleaned_parts.append(part)
-                            seen.add(part)
+                            seen_patterns.add(part)
+                    
                     cleaned_path = str(Path(*cleaned_parts))
+                    logger.debug(f"Cleaned path: {file} -> {cleaned_path}")
                     
                     # Determine target path
                     if cleaned_path.startswith('dataset/'):
@@ -135,15 +145,16 @@ class ProjectManager:
                     else:
                         target_path = self.project_path / cleaned_path
                     
-                    # Use the shortest path if there are duplicates
+                    # Store the shortest path version
                     norm_path = str(target_path).lower()
-                    if norm_path not in files_to_extract or len(file) < len(files_to_extract[norm_path][0]):
-                        files_to_extract[norm_path] = (file, target_path)
+                    if norm_path not in files_to_extract or len(cleaned_path) < len(files_to_extract[norm_path][0]):
+                        files_to_extract[norm_path] = (cleaned_path, target_path)
                 
                 # Extract files using the cleaned paths
-                for file, target_path in files_to_extract.values():
+                for source_path, target_path in files_to_extract.values():
                     target_path.parent.mkdir(parents=True, exist_ok=True)
-                    zip_ref.extract(file, target_path.parent)
+                    # Extract using original path but to cleaned target location
+                    zip_ref.extract(source_path, target_path.parent)
                     logger.info(f"Restored: {target_path.relative_to(self.project_path if self.project_path in target_path.parents else Path('/content'))}")
                     
             logger.info("Restore completed")
