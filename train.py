@@ -1,6 +1,7 @@
 import torch
 import os
 import argparse
+from pathlib import Path
 from utils.dataset import DeepfakeDataset
 from utils.hardware import HardwareManager
 from utils.progress import ProgressTracker, TrainingController
@@ -32,130 +33,112 @@ def save_checkpoint(model, checkpoint_path, epoch, optimizer, scheduler, metrics
         
     torch.save(checkpoint, checkpoint_path)
 
-def find_latest_checkpoint(model_name: str) -> Optional[str]:
-    """Find the latest checkpoint for a model."""
-    checkpoint_dir = os.path.join(CHECKPOINTS_PATH, model_name)
-    if not os.path.exists(checkpoint_dir):
-        return None
-        
-    checkpoints = glob.glob(os.path.join(checkpoint_dir, "*.pth"))
-    if not checkpoints:
-        return None
-        
-    # Get latest checkpoint by modification time
-    return max(checkpoints, key=os.path.getctime)
-
 def train(config: Config, resume: bool = False):
     """Train a model with the given configuration."""
     try:
         # Initialize project manager
-        project_manager = ProjectManager(config.base_path, use_drive=config.use_drive)
-        
-        # Initialize training controller
-        controller = TrainingController()
+        project_manager = ProjectManager(project_path=config.base_path, use_drive=config.use_drive)
         
         # Initialize hardware
         hw_manager = HardwareManager()
         hw_manager.print_hardware_info()
         
-        # Create dataloaders
-        dataloaders = DeepfakeDataset.create_dataloaders(
-            data_dir=config.paths['data'],
-            batch_size=config.training.batch_size,
-            num_workers=config.data.num_workers,
-            image_size=config.data.image_size
-        )
-        
-        # Initialize model
-        model = get_model(
-            architecture=config.model.architecture,
-            pretrained=config.model.pretrained,
-            num_classes=config.model.num_classes
-        ).to(hw_manager.device)
-        
-        # Get optimizer and scheduler
-        optimizer, scheduler = model.configure_optimizers()
-        
-        # Load checkpoint if resuming
-        start_epoch = 0
-        if resume:
-            checkpoint_path = find_latest_checkpoint(config.model.architecture)
-            if checkpoint_path:
-                print(f"Resuming from checkpoint: {checkpoint_path}")
-                checkpoint = torch.load(checkpoint_path, map_location=hw_manager.device)
-                model.load_state_dict(checkpoint['model_state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                if scheduler and 'scheduler_state_dict' in checkpoint:
-                    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-                start_epoch = checkpoint['epoch'] + 1
-                print(f"Resuming from epoch {start_epoch}")
-            else:
-                print("No checkpoint found, starting from scratch")
-        
-        # Initialize progress tracking
-        progress = ProgressTracker(
-            num_epochs=config.training.num_epochs,
-            num_batches=len(dataloaders['train']),
-            hardware_manager=hw_manager
-        )
+        # Initialize training controller
+        controller = TrainingController()
         
         # Initialize visualizer
-        visualizer = TrainingVisualizer(config.paths['results'] / config.model.architecture)
+        results_path = Path(config.paths['results']) / config.model.architecture
+        visualizer = TrainingVisualizer(results_path)
         
-        # Plot expected learning rate schedule
-        visualizer.plot_learning_rate_schedule(
-            optimizer,
-            config.training.num_epochs,
-            len(dataloaders['train'])
+        # Get model
+        model = get_model(
+            config.model.architecture,
+            pretrained=config.model.pretrained,
+            num_classes=config.model.num_classes,
+            dropout_rate=config.model.dropout_rate
+        )
+        
+        # Move model to device
+        model = model.to(hw_manager.device)
+        
+        # Get dataloaders
+        dataloaders = {
+            'train': DeepfakeDataset.get_dataloader(
+                data_path=config.paths['data'],
+                batch_size=config.training.batch_size,
+                num_workers=config.data.num_workers,
+                image_size=config.data.image_size,
+                train=True
+            ),
+            'val': DeepfakeDataset.get_dataloader(
+                data_path=config.paths['data'],
+                batch_size=config.training.batch_size,
+                num_workers=config.data.num_workers,
+                image_size=config.data.image_size,
+                train=False
+            )
+        }
+        
+        # Setup training components
+        optimizer = model.configure_optimizers()[0]
+        scheduler = None
+        start_epoch = 0
+        best_val_acc = 0.0
+        
+        # Resume from checkpoint if requested
+        if resume:
+            checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
+            checkpoints = list(checkpoint_dir.glob("*.pth"))
+            if checkpoints:
+                latest_checkpoint = max(checkpoints, key=lambda x: x.stat().st_mtime)
+                checkpoint = torch.load(latest_checkpoint, map_location=hw_manager.device)
+                model.load_state_dict(checkpoint['model_state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                start_epoch = checkpoint['epoch'] + 1
+                best_val_acc = checkpoint.get('best_val_acc', 0.0)
+                logging.info(f"Resumed from checkpoint: {latest_checkpoint}")
+        
+        # Initialize progress tracker
+        progress = ProgressTracker(
+            num_epochs=config.training.num_epochs,
+            steps_per_epoch=len(dataloaders['train'])
         )
         
         # Training loop
-        best_val_acc = 0.0
-        for epoch in range(config.training.num_epochs):
-            # Check if training should stop
-            if controller.should_stop():
-                print("\nStopping training as requested...")
+        for epoch in range(start_epoch, config.training.num_epochs):
+            if controller.should_stop:
+                logging.info("Training stopped by user")
                 break
                 
-            # Training phase
             model.train()
-            progress_bar = progress.new_epoch(epoch)
+            progress.start_epoch(epoch)
             
-            for batch_idx, (images, labels) in enumerate(dataloaders['train']):
-                # Check if training should stop
-                if controller.should_stop():
-                    print("\nStopping training as requested...")
-                    progress_bar.close()
-                    return
+            # Training phase
+            for batch in dataloaders['train']:
+                if controller.should_stop:
+                    break
                     
+                images, labels = batch
                 images = images.to(hw_manager.device)
                 labels = labels.to(hw_manager.device)
                 
-                # Training step
-                metrics = model.training_step((images, labels))
-                
-                # Optimizer step with gradient scaling for mixed precision
+                # Forward pass
                 optimizer.zero_grad()
-                if hasattr(model, 'scaler') and model.scaler:
-                    model.scaler.scale(metrics['loss']).backward()
-                    model.scaler.step(optimizer)
-                    model.scaler.update()
-                else:
-                    metrics['loss'].backward()
-                    optimizer.step()
+                outputs = model(images)
+                loss = torch.nn.CrossEntropyLoss()(outputs, labels)
                 
-                # Step LR scheduler if it's OneCycleLR
-                if scheduler is not None and not isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    scheduler.step()
+                # Backward pass
+                loss.backward()
+                optimizer.step()
+                
+                # Update metrics
+                _, predicted = torch.max(outputs.data, 1)
+                accuracy = (predicted == labels).float().mean()
                 
                 # Update progress
-                progress.update_batch(
-                    batch_idx,
-                    metrics['loss'].item(),
-                    metrics['accuracy'].item(),
-                    progress_bar
-                )
+                progress.update(loss=loss.item(), accuracy=accuracy.item())
             
+            # End training phase
             progress_bar.close()
             
             # Validation phase
@@ -173,56 +156,27 @@ def train(config: Config, resume: bool = False):
                 for images, labels in dataloaders['val']:
                     images = images.to(hw_manager.device)
                     labels = labels.to(hw_manager.device)
-                    batch_metrics = model.validation_step((images, labels))
                     
-                    # Accumulate metrics
-                    val_metrics['loss'] += batch_metrics['loss'].item() * images.size(0)
-                    val_metrics['accuracy'] += batch_metrics['accuracy'].item() * images.size(0)
+                    # Forward pass
+                    outputs = model(images)
+                    loss = torch.nn.CrossEntropyLoss()(outputs, labels)
+                    
+                    # Get predictions
+                    _, predicted = torch.max(outputs.data, 1)
+                    accuracy = (predicted == labels).float().mean()
+                    
+                    # Store results
+                    val_metrics['loss'] += loss.item() * images.size(0)
+                    val_metrics['accuracy'] += accuracy.item() * images.size(0)
                     val_metrics['num_samples'] += images.size(0)
-                    
-                    # Store predictions and labels for plotting
-                    val_metrics['all_preds'].extend(batch_metrics['predictions'].cpu().numpy())
+                    val_metrics['all_preds'].extend(predicted.cpu().numpy())
                     val_metrics['all_labels'].extend(labels.cpu().numpy())
-                    probs = torch.softmax(model(images), dim=1)
+                    probs = torch.softmax(outputs, dim=1)
                     val_metrics['all_probs'].extend(probs[:, 1].cpu().numpy())
-                    
-            # Calculate average validation metrics
+            
+            # Calculate average metrics
             val_metrics['loss'] /= val_metrics['num_samples']
             val_metrics['accuracy'] /= val_metrics['num_samples']
-            
-            # Update ReduceLROnPlateau scheduler if used
-            if scheduler is not None and isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                scheduler.step(val_metrics['loss'])
-            
-            # Update visualizer
-            current_lr = optimizer.param_groups[0]['lr']
-            visualizer.update_history(
-                {
-                    'train_loss': progress.running_loss,
-                    'train_acc': progress.running_acc,
-                    'val_loss': val_metrics['loss'],
-                    'val_acc': val_metrics['accuracy']
-                },
-                current_lr
-            )
-            
-            # Plot training history
-            visualizer.plot_training_history()
-            
-            # Plot validation metrics every few epochs
-            if (epoch + 1) % 5 == 0:
-                visualizer.plot_confusion_matrix(
-                    np.array(val_metrics['all_labels']),
-                    np.array(val_metrics['all_preds'])
-                )
-                visualizer.plot_roc_curve(
-                    np.array(val_metrics['all_labels']),
-                    np.array(val_metrics['all_probs'])
-                )
-                visualizer.plot_prediction_distribution(
-                    np.array(val_metrics['all_probs']),
-                    np.array(val_metrics['all_labels'])
-                )
             
             # End epoch and display metrics
             progress.end_epoch(val_metrics)
@@ -230,14 +184,9 @@ def train(config: Config, resume: bool = False):
             # Save checkpoint if best model
             if val_metrics['accuracy'] > best_val_acc:
                 best_val_acc = val_metrics['accuracy']
-                checkpoint_dir = os.path.join(
-                    config.paths['checkpoints'],
-                    config.model.architecture
-                )
-                best_path = os.path.join(
-                    checkpoint_dir,
-                    f"checkpoint_best.pth"
-                )
+                checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                best_path = checkpoint_dir / "checkpoint_best.pth"
                 save_checkpoint(model, best_path, epoch, optimizer, scheduler, val_metrics)
                 if config.use_drive:
                     project_manager.backup()  # This will include the new best checkpoint
