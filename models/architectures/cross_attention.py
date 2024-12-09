@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import timm
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 from models.base_model import BaseModel
 from utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
 
