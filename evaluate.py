@@ -6,6 +6,7 @@ import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
 import logging
 import os
+import matplotlib.pyplot as plt
 
 from models.model_registry import get_model, MODEL_REGISTRY
 from utils.dataset import DeepfakeDataset
@@ -176,10 +177,23 @@ def main():
     predictions, labels, probabilities = evaluate(model, test_loader, hw_manager.device)
     metrics = compute_metrics(predictions, labels, probabilities)
     
-    # Plot evaluation results
+    # Plot and display evaluation results
+    print("\nGenerating and displaying evaluation plots...")
+    
+    # Plot confusion matrix
+    plt.figure(figsize=(10, 8))
     visualizer.plot_confusion_matrix(labels, predictions)
+    plt.show()
+    
+    # Plot ROC curve
+    plt.figure(figsize=(10, 8))
     visualizer.plot_roc_curve(labels, probabilities)
+    plt.show()
+    
+    # Plot prediction distribution
+    plt.figure(figsize=(10, 8))
     visualizer.plot_prediction_distribution(probabilities, labels)
+    plt.show()
     
     # Save evaluation summary
     visualizer.save_training_summary(metrics, args.model)
