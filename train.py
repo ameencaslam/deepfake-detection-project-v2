@@ -78,19 +78,23 @@ def train(config: Config, resume: bool = False):
         checkpoint = None
         if resume:
             checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
-            checkpoints = list(checkpoint_dir.glob("*.pth"))
-            if checkpoints:
+            checkpoints = list(checkpoint_dir.glob("checkpoint_best.pth"))
+            if not checkpoints:
+                logging.warning("No checkpoint found for resuming, starting fresh")
+                resume = False
+            else:
                 latest_checkpoint = max(checkpoints, key=lambda x: x.stat().st_mtime)
                 logging.info(f"Loading checkpoint: {latest_checkpoint}")
                 checkpoint = torch.load(latest_checkpoint, map_location=hw_manager.device)
                 logging.info(f"Previous best validation accuracy: {checkpoint['metrics'].get('accuracy', 0.0):.4f}")
         
         # Initialize model
-        if resume:
+        if resume and checkpoint is not None:
             logging.info("Initializing model from checkpoint")
+            # Create model without pretrained weights
             model = get_model(
                 config.model.architecture,
-                pretrained=False,  # No pretrained weights when resuming
+                pretrained=False,
                 num_classes=config.model.num_classes,
                 dropout_rate=config.model.dropout_rate
             )

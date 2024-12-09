@@ -109,31 +109,42 @@ class ProjectManager:
             
             backup_file = max(backups, key=os.path.getctime)
             
-            # Create directories
+            # Create base directories
             self.project_path.mkdir(parents=True, exist_ok=True)
             Path('/content/dataset').mkdir(parents=True, exist_ok=True)
             
             # Extract files
             logger.info(f"Restoring from: {backup_file}")
             with zipfile.ZipFile(backup_file, 'r') as zip_ref:
-                # First, list all files and normalize paths
+                # First, list all files and clean paths
                 files_to_extract = {}
                 for file in zip_ref.namelist():
-                    if file.startswith('dataset/'):
-                        target_path = Path('/content/dataset') / Path(file).relative_to('dataset')
+                    # Clean up path by removing any duplicate directory patterns
+                    parts = Path(file).parts
+                    cleaned_parts = []
+                    seen = set()
+                    for part in parts:
+                        if part not in seen:
+                            cleaned_parts.append(part)
+                            seen.add(part)
+                    cleaned_path = str(Path(*cleaned_parts))
+                    
+                    # Determine target path
+                    if cleaned_path.startswith('dataset/'):
+                        target_path = Path('/content/dataset') / Path(cleaned_path).relative_to('dataset')
                     else:
-                        target_path = self.project_path / file
+                        target_path = self.project_path / cleaned_path
                     
                     # Use the shortest path if there are duplicates
-                    norm_path = str(target_path).lower()  # Normalize for comparison
+                    norm_path = str(target_path).lower()
                     if norm_path not in files_to_extract or len(file) < len(files_to_extract[norm_path][0]):
                         files_to_extract[norm_path] = (file, target_path)
                 
-                # Extract files using the shortest paths
+                # Extract files using the cleaned paths
                 for file, target_path in files_to_extract.values():
                     target_path.parent.mkdir(parents=True, exist_ok=True)
                     zip_ref.extract(file, target_path.parent)
-                    logger.info(f"Restored: {file}")
+                    logger.info(f"Restored: {target_path.relative_to(self.project_path if self.project_path in target_path.parents else Path('/content'))}")
                     
             logger.info("Restore completed")
             
