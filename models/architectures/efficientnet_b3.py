@@ -25,8 +25,15 @@ class EfficientNetModel(BaseModel):
             drop_rate=dropout_rate
         )
         
+        # Get feature dimensions
+        with torch.no_grad():
+            # Pass a dummy input to get feature dimensions
+            dummy_input = torch.zeros(1, 3, 224, 224)
+            features = self.model.forward_features(dummy_input)
+            self.feature_dim = features.shape[1]  # Get channel dimension
+        
         # Feature processing
-        self.feature_norm = nn.LayerNorm(self.model.num_features)
+        self.feature_norm = nn.LayerNorm(self.feature_dim)
         self.feature_dropout = nn.Dropout(dropout_rate)
         
         # Multi-scale feature aggregation
@@ -35,7 +42,7 @@ class EfficientNetModel(BaseModel):
         
         # Additional feature processing
         self.feature_reduction = nn.Sequential(
-            nn.Linear(self.model.num_features * 2, 512),
+            nn.Linear(self.feature_dim * 2, 512),
             nn.LayerNorm(512),
             nn.GELU(),
             nn.Dropout(dropout_rate * 0.5)
@@ -62,7 +69,8 @@ class EfficientNetModel(BaseModel):
             'pretrained': pretrained,
             'num_classes': num_classes,
             'dropout_rate': dropout_rate,
-            'label_smoothing': label_smoothing
+            'label_smoothing': label_smoothing,
+            'feature_dim': self.feature_dim
         }
         
     def _initialize_weights(self):
