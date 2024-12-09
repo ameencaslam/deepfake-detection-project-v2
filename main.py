@@ -57,13 +57,18 @@ def main():
     setup_logging()
     
     # Setup Drive if needed
+    drive_available = False
     if args.drive:
-        setup_drive(args.drive)
+        drive_available = setup_drive(args.drive)
     
     # Initialize project manager
-    project_manager = ProjectManager(project_path=PROJECT_ROOT, use_drive=args.drive)
-    if args.drive:
-        project_manager.restore()  # Restore from latest backup if available
+    project_manager = ProjectManager(project_path=PROJECT_ROOT, use_drive=drive_available)
+    if drive_available:
+        try:
+            project_manager.restore()  # Try to restore from latest backup if available
+        except Exception as e:
+            logging.warning(f"Could not restore from backup: {str(e)}")
+            logging.info("Continuing with fresh start")
     
     # Now setup paths and validate dataset (after potential restore)
     setup_paths()
@@ -72,7 +77,7 @@ def main():
     # Initialize configuration
     config = Config(
         base_path=PROJECT_ROOT,
-        use_drive=args.drive
+        use_drive=drive_available
     )
 
     # Update batch size if provided
@@ -88,9 +93,13 @@ def main():
         train_model(args.model, config)
         
     # Create new backup after training
-    if args.drive:
-        project_manager.backup()
-        project_manager.clean()
+    if drive_available:
+        try:
+            project_manager.backup()
+            project_manager.clean()
+        except Exception as e:
+            logging.error(f"Failed to create backup: {str(e)}")
+            logging.warning("Training completed but backup failed")
 
 if __name__ == '__main__':
     try:

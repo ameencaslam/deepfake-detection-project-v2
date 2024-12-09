@@ -89,22 +89,24 @@ class ProjectManager:
             raise
             
     def restore(self):
-        """Restore from latest backup."""
+        """Restore from latest backup if available."""
         try:
             # Skip if Drive is not enabled
             if not self.use_drive:
                 logger.info("Drive backup disabled, skipping restore")
                 return
-                
+            
             # Check Drive
             if not os.path.exists('/content/drive/MyDrive'):
                 raise RuntimeError("Google Drive is not mounted")
-                
+            
             # Find latest backup
             backup_pattern = str(self.drive_path / "project_backup_*.zip")
             backups = glob.glob(backup_pattern)
             if not backups:
-                raise FileNotFoundError("No backups found")
+                logger.info("No previous backups found, starting fresh")
+                return
+            
             backup_file = max(backups, key=os.path.getctime)
             
             # Create directories
@@ -126,8 +128,11 @@ class ProjectManager:
             logger.info("Restore completed")
             
         except Exception as e:
-            logger.error(f"Restore failed: {str(e)}")
-            raise
+            if isinstance(e, FileNotFoundError):
+                logger.info("No previous backups found, starting fresh")
+            else:
+                logger.error(f"Restore failed: {str(e)}")
+                raise
             
     def clean(self):
         """Clean temporary and unnecessary files."""
