@@ -15,6 +15,7 @@ import numpy as np
 from utils.visualization import TrainingVisualizer
 import glob
 from typing import Optional
+from utils.project_manager import ProjectManager
 
 def save_checkpoint(model, checkpoint_path, epoch, optimizer, scheduler, metrics):
     """Save model checkpoint."""
@@ -46,14 +47,14 @@ def find_latest_checkpoint(model_name: str) -> Optional[str]:
     return max(checkpoints, key=os.path.getctime)
 
 def train(config: Config, resume: bool = False):
-    """Train the model."""
-    # Initialize backup system (only for saving)
-    backup_manager = ProjectBackup(config.base_path, config.use_drive)
-    
-    # Initialize training controller
-    controller = TrainingController()
-    
+    """Train a model with the given configuration."""
     try:
+        # Initialize project manager
+        project_manager = ProjectManager(config.base_path, use_drive=config.use_drive)
+        
+        # Initialize training controller
+        controller = TrainingController()
+        
         # Initialize hardware
         hw_manager = HardwareManager()
         hw_manager.print_hardware_info()
@@ -239,11 +240,8 @@ def train(config: Config, resume: bool = False):
                     f"checkpoint_best.pth"
                 )
                 save_checkpoint(model, best_path, epoch, optimizer, scheduler, val_metrics)
-                backup_manager.backup_to_drive(
-                    best_path, 
-                    'checkpoints',
-                    model_name=config.model.architecture
-                )
+                if config.use_drive:
+                    project_manager.backup()  # This will include the new best checkpoint
             
             # Display stop button after each epoch
             print("\nClick 'Stop Training' to stop after this epoch, or let it continue...")
@@ -258,8 +256,8 @@ def train(config: Config, resume: bool = False):
     finally:
         # Create final backup
         print("Creating final backup...")
-        backup_manager.create_backup(include_checkpoints=True)
-        backup_manager.clean_old_backups(keep_last=3)
+        project_manager.backup()
+        project_manager.clean()
 
 def main():
     parser = argparse.ArgumentParser(description='Train Deepfake Detection Model')

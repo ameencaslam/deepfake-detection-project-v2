@@ -3,7 +3,7 @@ import os
 from config.paths import *
 from config.base_config import Config
 from train import train
-from utils.backup import ProjectBackup
+from manage import ProjectManager
 import logging
 from google.colab import drive
 
@@ -56,8 +56,9 @@ def main():
     # Setup
     setup_logging()
     
-    # Initialize backup system first (this will restore from latest backup if available)
-    backup_manager = ProjectBackup(PROJECT_ROOT, use_drive=args.drive)
+    # Initialize project manager (this will restore from latest backup if available)
+    project_manager = ProjectManager(PROJECT_ROOT, use_drive=args.drive)
+    project_manager.restore()  # Restore from latest backup if available
     
     # Now setup paths and validate dataset (after potential restore)
     setup_paths()
@@ -82,8 +83,8 @@ def main():
         train_model(args.model, config)
         
     # Create new backup after training
-    backup_manager.create_backup()
-    backup_manager.clean_old_backups()
+    project_manager.backup()
+    project_manager.clean()
 
 if __name__ == '__main__':
     try:

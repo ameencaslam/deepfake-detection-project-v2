@@ -10,8 +10,8 @@ import os
 from models.model_registry import get_model, MODEL_REGISTRY
 from utils.dataset import DeepfakeDataset
 from utils.hardware import HardwareManager
-from utils.backup import ProjectBackup
-from config.paths import get_checkpoint_dir, get_data_dir, PROJECT_ROOT
+from manage import ProjectManager
+from config.paths import get_checkpoint_dir, get_data_dir, PROJECT_ROOT, CHECKPOINTS_PATH
 from config.base_config import Config
 from utils.visualizer import TrainingVisualizer
 
@@ -109,6 +109,10 @@ def main():
     # Parse arguments
     args = parse_args()
     
+    # Initialize project manager and restore if needed
+    project_manager = ProjectManager(PROJECT_ROOT, use_drive=args.drive)
+    project_manager.restore()  # This will restore latest backup if available
+    
     # Initialize visualizer
     visualizer = TrainingVisualizer(Path(PROJECT_ROOT) / 'results' / args.model / 'evaluation')
     
@@ -194,6 +198,9 @@ def main():
     print(f"False Negatives: {metrics['false_negatives']}")
     
     print(f"\nPlots saved in: {visualizer.save_dir}")
+    
+    # Backup evaluation results
+    project_manager.backup()
 
 if __name__ == '__main__':
     try:
@@ -202,4 +209,4 @@ if __name__ == '__main__':
         logging.info("\nEvaluation interrupted by user")
     except Exception as e:
         logging.error(f"\nError during evaluation: {str(e)}")
-        raise 
+        raise

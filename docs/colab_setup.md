@@ -1,174 +1,101 @@
-# Colab Setup Guide
+# Running on Google Colab
 
-## Project Structure in Colab
+1. Mount Drive
+2. Clone repository to `/content/PROJECT-V2`
+3. Create symbolic link: `/content/dataset` → `/content/drive/MyDrive/deepfake-project/dataset`
+4. Install requirements
+
+## Available Models
+
+- `swin` - Swin Transformer
+- `two_stream` - Two-Stream Network
+- `xception` - Xception
+- `cnn_transformer` - CNN-Transformer Hybrid
+- `cross_attention` - Cross-Attention Model
+- `efficientnet` - EfficientNet-B3
+
+## Command Options
+
+### Training Options
 
 ```
-/content/                           # Colab root directory
-├── PROJECT-V2/                     # Main project directory
-│   ├── config/                     # Configuration files
-│   ├── models/                     # Model architectures
-│   ├── utils/                     # Utility functions
-│   ├── main.py                    # High-level training script
-│   ├── train.py                   # Detailed training script
-│   └── evaluate.py                # Evaluation script
-│
-├── dataset/                        # Dataset directory
-│   ├── train/                     # Training data
-│   │   ├── real/                  # Real images
-│   │   └── fake/                  # Fake images
-│   └── test/                      # Test data
-│       ├── real/                  # Real images
-│       └── fake/                  # Fake images
-│
-└── drive/                         # Google Drive mount point
-    └── MyDrive/
-        └── deepfake-project/      # Project backups
-            ├── checkpoints/       # Model checkpoints
-            └── results/           # Training results
+python main.py [OPTIONS]
+
+Options:
+--model MODEL_NAME    Model to use (see Available Models above)
+--drive BOOL         Use Google Drive (True/False)
+--batch INT          Batch size (default: 32)
+--resume             Resume from latest checkpoint
 ```
 
-## Setup Steps
+Examples:
 
-### 1. Mount Google Drive
-
-```python
-from google.colab import drive
-drive.mount('/content/drive')
 ```
-
-### 2. Clone Repository
-
-```python
-!git clone https://github.com/your-repo/PROJECT-V2.git
-%cd PROJECT-V2
-```
-
-### 3. Install Dependencies
-
-```python
-!pip install -r requirements.txt
-```
-
-### 4. Set Up Dataset
-
-```python
-# Create dataset directories
-!mkdir -p /content/dataset/train/real
-!mkdir -p /content/dataset/train/fake
-!mkdir -p /content/dataset/test/real
-!mkdir -p /content/dataset/test/fake
-
-# Copy or download your dataset here
-```
-
-## Running Models
-
-### Using main.py (Recommended for Colab)
-
-```python
-# Train all models with Drive backup
-!python main.py --model all --drive True
-
-# Train single model
-!python main.py --model efficientnet --drive True --batch 32
-```
-
-### Using train.py (Advanced Control)
-
-```python
 # Basic training
-!python train.py \
-    --model efficientnet \
-    --data_path /content/dataset/train \
-    --batch_size 32
+python main.py --model efficientnet --drive True
 
-# Advanced options
-!python train.py \
-    --model efficientnet \
-    --data_path /content/dataset/train \
-    --batch_size 32 \
-    --learning_rate 1e-4 \
-    --num_epochs 50
+# Resume training
+python main.py --model efficientnet --drive True --resume
+
+# Custom batch size
+python main.py --model efficientnet --drive True --batch 64
 ```
 
-### Evaluation
+### Evaluation Options
 
-```python
-# Quick evaluation
-!python evaluate.py --model efficientnet
+```
+python evaluate.py [OPTIONS]
 
-# Detailed evaluation
-!python evaluate.py \
-    --model efficientnet \
-    --data_path /content/dataset/test \
-    --checkpoint /content/drive/MyDrive/deepfake-project/checkpoints/efficientnet/best.pth
+Options:
+--model MODEL_NAME       Model to evaluate
+--checkpoint PATH       Path to specific checkpoint (optional)
+--data_path PATH       Path to test data (optional)
+--batch_size INT       Batch size for evaluation (default: 32)
 ```
 
-## Best Practices for Colab
+Examples:
 
-### 1. Memory Management
+```
+# Basic evaluation
+python evaluate.py --model efficientnet
 
-- Start with smaller batch sizes (16 or 32)
-- Enable GPU runtime (Runtime → Change runtime type → GPU)
-- Monitor GPU memory usage
-- Clear memory between runs
+# Evaluate specific checkpoint
+python evaluate.py --model efficientnet --checkpoint path/to/checkpoint.pth
 
-### 2. Drive Integration
-
-- Always use `--drive True` for backup
-- Check Drive space regularly
-- Keep important checkpoints in Drive
-- Clean old checkpoints periodically
-
-### 3. Dataset Handling
-
-- Keep dataset in /content/dataset
-- Use balanced train/test split
-- Verify data paths before training
-- Monitor data loading speed
-
-### 4. Runtime Settings
-
-```python
-# Check GPU availability
-!nvidia-smi
-
-# Monitor GPU usage
-!nvidia-smi --query-gpu=memory.used --format=csv -l 1
+# Custom test data
+python evaluate.py --model efficientnet --data_path /path/to/test/data
 ```
 
-## Common Issues and Solutions
+### Project Management
 
-### 1. Out of Memory
+```
+python manage.py [COMMAND]
 
-```python
-# Reduce batch size
-!python main.py --model efficientnet --batch 16
-
-# Clear GPU memory
-import torch
-torch.cuda.empty_cache()
+Commands:
+backup              Create project backup
+restore            Restore from latest backup
+clean              Clean temporary files
 ```
 
-### 2. Drive Issues
+Examples:
 
-```python
-# Remount Drive if disconnected
-from google.colab import drive
-drive.mount('/content/drive', force_remount=True)
+```
+# Create backup
+python manage.py backup
+
+# Restore from backup
+python manage.py restore
+
+# Clean temp files
+python manage.py clean
 ```
 
-### 3. Training Interruption
+## Drive Structure
 
-- Checkpoints are automatically saved to Drive
-- Resume training using latest checkpoint
-- Use `--resume` flag with train.py
-
-## Getting Help
-
-```python
-# View available options
-!python main.py --help
-!python train.py --help
-!python evaluate.py --help
+```
+drive/MyDrive/deepfake-project/
+├── dataset/           # Your dataset
+├── checkpoints/       # Model checkpoints
+├── results/          # Training results
+└── backups/          # Project backups
 ```

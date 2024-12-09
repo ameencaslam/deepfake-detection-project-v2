@@ -1,37 +1,35 @@
 # Deepfake Detection Project
 
-A comprehensive deepfake detection system with multiple architectures and training optimizations.
+A comprehensive deepfake detection system supporting various model architectures.
 
 ## Project Structure
 
 ```
-deepfake_detection/
+project/
 ├── config/                 # Configuration files
 ├── models/                 # Model architectures
-│   └── architectures/     # Different model implementations
 ├── utils/                 # Utility functions
 ├── docs/                  # Documentation
-└── train.py              # Main training script
+├── main.py               # Main training script
+├── train.py              # Training script
+├── evaluate.py           # Evaluation script
+├── manage.py             # Project management
+└── requirements.txt      # Dependencies
 ```
 
 ## Features
 
-- Multiple state-of-the-art architectures
+- Support for various model architectures
 - Optimized training pipeline
-- Automatic backup system
+- Unified project management system
 - Google Drive integration
-- Progress tracking
+- Real-time progress tracking
 - Hardware optimization
+- Automatic checkpoint management
+- Training visualization
+- Comprehensive evaluation metrics
 
-## Architectures
-
-1. Swin Transformer
-2. Two-Stream Network
-3. Xception
-4. CNN-Transformer Hybrid
-5. Cross-Attention Model
-
-## Getting Started
+## Quick Start
 
 1. Install dependencies:
 
@@ -39,41 +37,48 @@ deepfake_detection/
    pip install -r requirements.txt
    ```
 
-2. Prepare your dataset:
+2. Prepare dataset:
 
-   - Place real images in `data/real/`
-   - Place fake images in `data/fake/`
+   - Place images in `dataset/` directory
+   - Dataset split info will be saved automatically
 
-3. Start training:
+3. Start training (example using EfficientNet):
 
-   ```python
-   from config.base_config import Config
-   from train import train
-
-   config = Config(base_path='/path/to/project')
-   train(config)
+   ```bash
+   python main.py --model efficientnet --drive True
    ```
+
+4. Evaluate model:
+   ```bash
+   python evaluate.py --model efficientnet
+   ```
+
+## Project Management
+
+The `manage.py` script provides unified project management:
+
+```python
+from manage import ProjectManager
+
+manager = ProjectManager(project_path='project', use_drive=True)
+manager.backup()    # Create backup
+manager.restore()   # Restore from backup
+manager.clean()     # Clean temp files
+```
 
 ## Documentation
 
-- See individual README files in the `docs/` folder for detailed documentation of each component
-- Each architecture has its own documentation with specific features and configurations
+- `quickstart.md` - Getting started guide
+- `models.md` - Model architectures and integration
+- `config.md` - Configuration system
+- `colab_setup.md` - Google Colab setup
 
 ## Requirements
 
 - Python 3.8+
 - PyTorch 2.0+
-- CUDA compatible GPU (recommended)
+- CUDA-compatible GPU (recommended)
 - Google Drive for backup (optional)
-
-## Features
-
-- Automatic dataset splitting
-- Mixed precision training
-- Learning rate scheduling
-- Progress tracking
-- Model checkpointing
-- Automatic backups
 
 ## License
 

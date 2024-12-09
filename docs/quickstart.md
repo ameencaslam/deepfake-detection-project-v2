@@ -9,142 +9,114 @@
 pip install -r requirements.txt
 ```
 
-## Running Models
+## Training Models
 
-### Using main.py (High-Level Interface)
+### Using main.py (Recommended)
 
 ```bash
-# Train all models sequentially
-python main.py --model all
-
-# Train single model with Drive backup
+# Train with default settings (example using EfficientNet)
 python main.py --model efficientnet --drive True
 
 # Train with custom batch size
-python main.py --model swin --batch 64
+python main.py --model MODEL_NAME --drive True --batch 64
 ```
 
-### Using train.py (Detailed Control)
+### Using train.py (Advanced)
 
-```bash
-# Basic training
-python train.py --model efficientnet --data_path /path/to/data
+```python
+from config.base_config import Config
+from train import train
 
-# Advanced training options
-python train.py \
-    --model efficientnet \
-    --data_path /path/to/data \
-    --batch_size 32 \
-    --learning_rate 1e-4 \
-    --num_epochs 50
+# Configure and train any supported model
+config = Config(base_path='project_path', use_drive=True)
+config.model.architecture = 'MODEL_NAME'  # Set desired model
+train(config)
 ```
 
-## Available Models
-
-- Swin Transformer (`swin`)
-- Two-Stream Network (`two_stream`)
-- Xception (`xception`)
-- CNN-Transformer Hybrid (`cnn_transformer`)
-- Cross-Attention Model (`cross_attention`)
-- EfficientNet-B3 (`efficientnet`)
-
-## Evaluation
-
-Simple evaluation (uses latest checkpoint):
+## Model Evaluation
 
 ```bash
-python evaluate.py --model efficientnet
-```
+# Evaluate using latest checkpoint
+python evaluate.py --model MODEL_NAME
 
-Custom evaluation:
-
-```bash
+# Custom evaluation
 python evaluate.py \
-    --model efficientnet \
+    --model MODEL_NAME \
     --checkpoint path/to/checkpoint.pth \
     --data_path path/to/test/data \
     --batch_size 32
 ```
 
-## Getting Help
+## Project Management
 
-View available options for any script:
+The `manage.py` script handles project state:
 
 ```bash
-# High-level training options
-python main.py --help
+# Backup project state
+python manage.py backup
 
-# Detailed training options
-python train.py --help
+# Restore from backup
+python manage.py restore
 
-# Evaluation options
-python evaluate.py --help
+# Clean temporary files
+python manage.py clean
 ```
 
-## Project Structure
+## Directory Structure
 
 ```
 project/
-├── config/             # Configuration files
-├── models/             # Model architectures
-│   └── architectures/  # Individual model implementations
-├── utils/             # Utility functions
+├── config/             # Configuration
+├── models/            # Model architectures
+├── utils/             # Utilities
 ├── docs/              # Documentation
-├── main.py           # High-level training script
-├── train.py          # Detailed training script
+├── main.py           # Main script
+├── train.py          # Training script
 ├── evaluate.py       # Evaluation script
-└── requirements.txt  # Project dependencies
+├── manage.py         # Project management
+└── requirements.txt  # Dependencies
 ```
 
-## Script Purposes
+## Configuration
 
-### main.py (High-Level Control)
+Edit `config/base_config.py` for:
 
-- Train multiple models sequentially
-- Google Drive integration for backups
-- Simple command-line interface
-- Project-wide settings
-- Best for quick experiments
-
-### train.py (Detailed Control)
-
-- Single model training
-- Fine-grained parameter control
-- Advanced training features
-- Custom training loops
-- Best for detailed experimentation
-
-### evaluate.py (Model Evaluation)
-
-- Model performance testing
-- Metric computation
-- Confusion matrix analysis
-- Best for model assessment
+- Model parameters
+- Training settings
+- Dataset options
+- Hardware settings
 
 ## Common Operations
 
-### Using main.py
-
-```bash
-# Train all models
-python main.py --model all
-
-# Train single model
-python main.py --model efficientnet --drive True --batch 32
-```
-
-### Using train.py
+### Training
 
 ```bash
 # Basic training
-python train.py --model efficientnet
+python main.py --model MODEL_NAME --drive True
 
-# Resume training
-python train.py --model efficientnet --resume path/to/checkpoint.pth
+# Resume from checkpoint
+python main.py --model MODEL_NAME --drive True --resume
 ```
 
-### Configuration
+### Evaluation
 
-- Model configurations in `config/base_config.py`
-- Data paths in `config/paths.py`
-- Model-specific parameters through command line arguments
+```bash
+# Basic evaluation
+python evaluate.py --model MODEL_NAME
+
+# Detailed evaluation
+python evaluate.py --model MODEL_NAME --data_path test_data
+```
+
+### Project Management
+
+```bash
+# After training session
+python manage.py backup
+
+# Before new session
+python manage.py restore
+
+# Clean temporary files
+python manage.py clean
+```
