@@ -7,6 +7,7 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional
 from sklearn.model_selection import train_test_split
 import json
+from datetime import datetime
 
 class DeepfakeDataset(Dataset):
     def __init__(self, 
@@ -128,8 +129,33 @@ class DeepfakeDataset(Dataset):
         
     def save_split_info(self, save_path: str):
         """Save dataset split information to JSON file."""
+        # Ensure parent directory exists
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        # Add timestamp and additional metadata
+        split_info = {
+            'timestamp': datetime.now().isoformat(),
+            'data_dir': self.data_dir,
+            'split_ratio': {
+                'train': self.split_info['train_size'] / self.split_info['total_size'],
+                'val': self.split_info['val_size'] / self.split_info['total_size'],
+                'test': self.split_info['test_size'] / self.split_info['total_size']
+            },
+            **self.split_info
+        }
+        
+        # Save to JSON file
         with open(save_path, 'w') as f:
-            json.dump(self.split_info, f, indent=4)
+            json.dump(split_info, f, indent=4)
+            
+        # Try to backup to Drive if backup manager is available
+        try:
+            from .backup import ProjectBackup
+            backup_manager = ProjectBackup(os.path.dirname(save_path))
+            if backup_manager.use_drive:
+                backup_manager.backup_to_drive(save_path, 'dataset_info')
+        except Exception as e:
+            print(f"Note: Could not backup split info to Drive: {str(e)}")
             
     @staticmethod
     def create_dataloaders(data_dir: str,
@@ -153,7 +179,7 @@ class DeepfakeDataset(Dataset):
                 seed=seed
             )
             
-        # Save split info
+        # Save split info in dataset directory
         split_info_path = os.path.join(data_dir, 'split_info.json')
         datasets['train'].save_split_info(split_info_path)
         

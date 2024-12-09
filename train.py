@@ -3,7 +3,7 @@ import os
 import argparse
 from utils.dataset import DeepfakeDataset
 from utils.hardware import HardwareManager
-from utils.progress import ProgressTracker
+from utils.progress import ProgressTracker, TrainingController
 from utils.backup import ProjectBackup
 from config.base_config import Config
 from models.architectures import get_model
@@ -30,6 +30,9 @@ def save_checkpoint(model, checkpoint_path, epoch, optimizer, scheduler, metrics
 def train(config: Config):
     # Initialize backup system
     backup_manager = ProjectBackup(config.base_path, config.use_drive)
+    
+    # Initialize training controller
+    controller = TrainingController()
     
     try:
         # Initialize hardware
@@ -64,6 +67,11 @@ def train(config: Config):
         # Training loop
         best_val_acc = 0.0
         for epoch in range(config.training.num_epochs):
+            # Check if training should stop
+            if controller.should_stop():
+                print("\nStopping training as requested...")
+                break
+                
             # Training phase
             model.train()
             pbar = progress.new_epoch(epoch)
@@ -123,6 +131,9 @@ def train(config: Config):
                 
             # End epoch and display metrics
             progress.end_epoch(val_metrics)
+            
+            # Display stop button after each epoch
+            print("\nClick 'Stop Training' to stop after this epoch, or let it continue...")
             
             # Save checkpoint
             checkpoint_dir = os.path.join(

@@ -49,7 +49,8 @@ class ProjectBackup:
             'checkpoints': [],
             'configs': [],
             'logs': [],
-            'results': []
+            'results': [],
+            'dataset_info': []
         }
         
         # Python files
@@ -81,6 +82,12 @@ class ProjectBackup:
         if results_path.exists():
             for result_file in results_path.rglob("*.*"):
                 files['results'].append(str(result_file))
+
+        # Dataset split information
+        data_path = Path(os.path.join(self.base_path.parent, 'dataset'))
+        split_info_file = data_path / 'split_info.json'
+        if split_info_file.exists():
+            files['dataset_info'].append(str(split_info_file))
             
         return files
         

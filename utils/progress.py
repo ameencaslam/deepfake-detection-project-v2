@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from tqdm import tqdm
 import torch
 from .hardware import HardwareManager
+from IPython.display import display
+import ipywidgets as widgets
 
 @dataclass
 class TrainingMetrics:
@@ -109,10 +111,23 @@ class ProgressTracker:
 class TrainingController:
     def __init__(self):
         self.stop_next_epoch = False
+        self._create_stop_button()
+        
+    def _create_stop_button(self):
+        """Create and display stop button widget."""
+        self.stop_button = widgets.Button(
+            description='Stop Training',
+            button_style='danger',
+            layout=widgets.Layout(width='150px', height='40px')
+        )
+        self.stop_button.on_click(lambda b: self.request_stop())
+        display(self.stop_button)
         
     def request_stop(self):
         """Request training to stop after current epoch."""
         self.stop_next_epoch = True
+        self.stop_button.description = 'Stopping...'
+        self.stop_button.disabled = True
         print("\nTraining will stop after current epoch...")
         
     def should_stop(self) -> bool:
