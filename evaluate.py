@@ -5,6 +5,7 @@ from tqdm import tqdm
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
 import logging
+import os
 
 from models.model_registry import get_model, MODEL_REGISTRY
 from utils.dataset import DeepfakeDataset
@@ -108,14 +109,11 @@ def main():
     # Parse arguments
     args = parse_args()
     
-    # Initialize backup system first (this will restore from latest backup if available)
-    backup_manager = ProjectBackup(PROJECT_ROOT, use_drive=args.drive)
-    
     # Initialize visualizer
     visualizer = TrainingVisualizer(Path(PROJECT_ROOT) / 'results' / args.model / 'evaluation')
     
-    # Now check for checkpoints (after potential restore)
-    checkpoint_dir = Path(get_checkpoint_dir()) / args.model
+    # Check for checkpoints
+    checkpoint_dir = Path(CHECKPOINTS_PATH) / args.model
     if not checkpoint_dir.exists():
         raise ValueError(f"No checkpoints found for model {args.model} in {checkpoint_dir}")
     
@@ -127,6 +125,8 @@ def main():
     if args.checkpoint is None:
         args.checkpoint = str(max(checkpoints, key=lambda x: x.stat().st_mtime))
         print(f"Using latest checkpoint: {args.checkpoint}")
+    elif not os.path.exists(args.checkpoint):
+        raise ValueError(f"Specified checkpoint not found: {args.checkpoint}")
     
     # Initialize hardware
     hw_manager = HardwareManager()

@@ -13,6 +13,8 @@ from datetime import datetime
 import logging
 import numpy as np
 from utils.visualization import TrainingVisualizer
+import glob
+from typing import Optional
 
 def save_checkpoint(model, checkpoint_path, epoch, optimizer, scheduler, metrics):
     """Save model checkpoint."""
@@ -30,8 +32,22 @@ def save_checkpoint(model, checkpoint_path, epoch, optimizer, scheduler, metrics
         
     torch.save(checkpoint, checkpoint_path)
 
-def train(config: Config):
-    # Initialize backup system
+def find_latest_checkpoint(model_name: str) -> Optional[str]:
+    """Find the latest checkpoint for a model."""
+    checkpoint_dir = os.path.join(CHECKPOINTS_PATH, model_name)
+    if not os.path.exists(checkpoint_dir):
+        return None
+        
+    checkpoints = glob.glob(os.path.join(checkpoint_dir, "*.pth"))
+    if not checkpoints:
+        return None
+        
+    # Get latest checkpoint by modification time
+    return max(checkpoints, key=os.path.getctime)
+
+def train(config: Config, resume: bool = False):
+    """Train the model."""
+    # Initialize backup system (only for saving)
     backup_manager = ProjectBackup(config.base_path, config.use_drive)
     
     # Initialize training controller
@@ -59,6 +75,22 @@ def train(config: Config):
         
         # Get optimizer and scheduler
         optimizer, scheduler = model.configure_optimizers()
+        
+        # Load checkpoint if resuming
+        start_epoch = 0
+        if resume:
+            checkpoint_path = find_latest_checkpoint(config.model.architecture)
+            if checkpoint_path:
+                print(f"Resuming from checkpoint: {checkpoint_path}")
+                checkpoint = torch.load(checkpoint_path, map_location=hw_manager.device)
+                model.load_state_dict(checkpoint['model_state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                if scheduler and 'scheduler_state_dict' in checkpoint:
+                    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                start_epoch = checkpoint['epoch'] + 1
+                print(f"Resuming from epoch {start_epoch}")
+            else:
+                print("No checkpoint found, starting from scratch")
         
         # Initialize progress tracking
         progress = ProgressTracker(
@@ -235,6 +267,8 @@ def main():
                        help='Base path for saving models and data')
     parser.add_argument('--use_drive', type=bool, default=True,
                        help='Whether to use Google Drive for saving checkpoints')
+    parser.add_argument('--resume', action='store_true',
+                       help='Resume training from latest checkpoint')
     args = parser.parse_args()
     
     # Initialize config
@@ -252,7 +286,7 @@ def main():
         
     # Start training
     try:
-        train(config)
+        train(config, resume=args.resume)
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
     except Exception as e:

@@ -41,7 +41,63 @@ class DeepfakeDataset(Dataset):
         
         all_images = real_images + fake_images
         
-        # Split dataset
+        # Try to load existing split
+        split_info_path = os.path.join(data_dir, 'split_info.json')
+        if os.path.exists(split_info_path):
+            try:
+                with open(split_info_path, 'r') as f:
+                    saved_split = json.load(f)
+                
+                # Verify the dataset hasn't changed
+                if saved_split['total_size'] == len(all_images) and \
+                   saved_split['class_distribution']['real'] == len(real_images) and \
+                   saved_split['class_distribution']['fake'] == len(fake_images):
+                    
+                    # Use saved split information
+                    print(f"Using existing dataset split from {split_info_path}")
+                    train_size = saved_split['train_size']
+                    val_size = saved_split['val_size']
+                    test_size = saved_split['test_size']
+                    
+                    # Sort images to ensure consistent order
+                    all_images.sort(key=lambda x: x[0])
+                    
+                    # Split according to saved sizes
+                    train_images = all_images[:train_size]
+                    val_images = all_images[train_size:train_size + val_size]
+                    test_images = all_images[train_size + val_size:]
+                    
+                    self.split_info = saved_split
+                    
+                else:
+                    print("Dataset has changed, creating new split")
+                    train_images, val_images, test_images = self._create_split(
+                        all_images, split_ratio, seed
+                    )
+            except Exception as e:
+                print(f"Error loading split info: {str(e)}, creating new split")
+                train_images, val_images, test_images = self._create_split(
+                    all_images, split_ratio, seed
+                )
+        else:
+            train_images, val_images, test_images = self._create_split(
+                all_images, split_ratio, seed
+            )
+        
+        # Select appropriate split
+        if split == 'train':
+            self.images = train_images
+        elif split == 'val':
+            self.images = val_images
+        elif split == 'test':
+            self.images = test_images
+        else:
+            raise ValueError(f"Invalid split: {split}")
+            
+    def _create_split(self, all_images: List[Tuple[str, int]], 
+                    split_ratio: Tuple[float, float, float],
+                    seed: int) -> Tuple[List[Tuple[str, int]], ...]:
+        """Create a new dataset split."""
         train_ratio, val_ratio, test_ratio = split_ratio
         assert abs(sum(split_ratio) - 1.0) < 1e-5, "Split ratios must sum to 1"
         
@@ -64,16 +120,6 @@ class DeepfakeDataset(Dataset):
             stratify=[x[1] for x in temp_images]
         )
         
-        # Select appropriate split
-        if split == 'train':
-            self.images = train_images
-        elif split == 'val':
-            self.images = val_images
-        elif split == 'test':
-            self.images = test_images
-        else:
-            raise ValueError(f"Invalid split: {split}")
-            
         # Save split information
         self.split_info = {
             'train_size': len(train_images),
@@ -81,10 +127,12 @@ class DeepfakeDataset(Dataset):
             'test_size': len(test_images),
             'total_size': len(all_images),
             'class_distribution': {
-                'real': len(real_images),
-                'fake': len(fake_images)
+                'real': len([x for x in all_images if x[1] == 0]),
+                'fake': len([x for x in all_images if x[1] == 1])
             }
         }
+        
+        return train_images, val_images, test_images
         
     def __len__(self) -> int:
         return len(self.images)
