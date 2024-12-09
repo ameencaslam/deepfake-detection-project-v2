@@ -62,56 +62,75 @@ class ProjectBackup:
             latest_backup = max(backup_files, key=os.path.getctime)
             self.logger.info(f"Found latest backup: {latest_backup}")
             
-            # Create temporary extraction directory
+            # Create necessary directories
+            self.base_path.mkdir(parents=True, exist_ok=True)
             temp_dir = self.base_path / "temp_restore"
-            temp_dir.mkdir(exist_ok=True)
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+            temp_dir.mkdir(parents=True, exist_ok=True)
             
-            # Extract backup
-            with zipfile.ZipFile(latest_backup, 'r') as zip_ref:
-                zip_ref.extractall(temp_dir)
+            try:
+                # Extract backup
+                with zipfile.ZipFile(latest_backup, 'r') as zip_ref:
+                    zip_ref.extractall(temp_dir)
+                    
+                # Move files to correct locations
+                self._restore_from_temp(temp_dir)
+                self.logger.info("Successfully restored from latest backup")
                 
-            # Move files to correct locations
-            self._restore_from_temp(temp_dir)
-            
-            # Cleanup
-            shutil.rmtree(temp_dir)
-            self.logger.info("Successfully restored from latest backup")
+            finally:
+                # Cleanup temp directory
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
             
         except Exception as e:
             self.logger.error(f"Error restoring from backup: {str(e)}")
             
     def _restore_from_temp(self, temp_dir: Path):
         """Restore files from temporary directory to their proper locations."""
-        # Restore code files
-        for py_file in temp_dir.rglob("*.py"):
-            relative_path = py_file.relative_to(temp_dir)
-            target_path = self.base_path / relative_path
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(py_file, target_path)
+        try:
+            # Ensure base directories exist
+            self.base_path.mkdir(parents=True, exist_ok=True)
             
-        # Restore checkpoints
-        checkpoint_dir = temp_dir / "checkpoints"
-        if checkpoint_dir.exists():
-            target_checkpoint_dir = self.base_path / "checkpoints"
-            if target_checkpoint_dir.exists():
-                shutil.rmtree(target_checkpoint_dir)
-            shutil.copytree(checkpoint_dir, target_checkpoint_dir)
-            
-        # Restore configs
-        for config_file in temp_dir.rglob("*.json"):
-            relative_path = config_file.relative_to(temp_dir)
-            target_path = self.base_path / relative_path
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(config_file, target_path)
-            
-        # Restore dataset info
-        dataset_info_dir = temp_dir / "dataset_info"
-        if dataset_info_dir.exists():
-            for info_file in dataset_info_dir.glob("*"):
-                target_path = Path(os.path.dirname(self.base_path)) / "dataset" / info_file.name
+            # Restore code files
+            for py_file in temp_dir.rglob("*.py"):
+                relative_path = py_file.relative_to(temp_dir)
+                target_path = self.base_path / relative_path
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(info_file, target_path)
+                shutil.copy2(py_file, target_path)
+                self.logger.info(f"Restored: {relative_path}")
                 
+            # Restore checkpoints
+            checkpoint_dir = temp_dir / "checkpoints"
+            if checkpoint_dir.exists():
+                target_checkpoint_dir = self.base_path / "checkpoints"
+                if target_checkpoint_dir.exists():
+                    shutil.rmtree(target_checkpoint_dir)
+                shutil.copytree(checkpoint_dir, target_checkpoint_dir)
+                self.logger.info("Restored: checkpoints/")
+                
+            # Restore configs
+            for config_file in temp_dir.rglob("*.json"):
+                relative_path = config_file.relative_to(temp_dir)
+                target_path = self.base_path / relative_path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(config_file, target_path)
+                self.logger.info(f"Restored: {relative_path}")
+                
+            # Restore dataset info
+            dataset_info_dir = temp_dir / "dataset_info"
+            if dataset_info_dir.exists():
+                dataset_path = Path(os.path.dirname(self.base_path)) / "dataset"
+                dataset_path.mkdir(parents=True, exist_ok=True)
+                for info_file in dataset_info_dir.glob("*"):
+                    target_path = dataset_path / info_file.name
+                    shutil.copy2(info_file, target_path)
+                    self.logger.info(f"Restored: dataset/{info_file.name}")
+                    
+        except Exception as e:
+            self.logger.error(f"Error during file restoration: {str(e)}")
+            raise
+        
     def _get_important_files(self) -> Dict[str, List[str]]:
         """Get list of important files to backup."""
         files = {
