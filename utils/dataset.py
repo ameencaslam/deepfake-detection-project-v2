@@ -195,3 +195,42 @@ class DeepfakeDataset(Dataset):
             )
             
         return dataloaders 
+
+    @staticmethod
+    def get_dataloader(data_path: str,
+                      batch_size: int = 32,
+                      num_workers: int = 4,
+                      image_size: int = 224,
+                      train: bool = False) -> DataLoader:
+        """Get a single dataloader for evaluation or training.
+        
+        Args:
+            data_path: Path to data directory containing 'real' and 'fake' subdirectories
+            batch_size: Batch size for the dataloader
+            num_workers: Number of workers for data loading
+            image_size: Size of input images
+            train: Whether this is for training (affects transforms and shuffling)
+        """
+        # Get appropriate transform
+        transforms_dict = DeepfakeDataset.get_transforms(image_size)
+        transform = transforms_dict['train'] if train else transforms_dict['val']
+        
+        # Create dataset
+        dataset = DeepfakeDataset(
+            data_dir=data_path,
+            transform=transform,
+            split='train' if train else 'test',  # Use test split for evaluation
+            split_ratio=(0.7, 0.15, 0.15)  # Default split ratio
+        )
+        
+        # Create and return dataloader
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=train,  # Shuffle only for training
+            num_workers=num_workers,
+            pin_memory=True
+        )
+
+# Update exports at the end of the file
+__all__ = ['DeepfakeDataset', 'get_dataloader', 'create_dataloaders'] 

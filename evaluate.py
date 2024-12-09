@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
 
 from models.model_registry import get_model, MODEL_REGISTRY
-from utils.dataset import get_dataloader
+from utils.dataset import DeepfakeDataset
 from utils.hardware import get_device
 from config.paths import get_checkpoint_dir, get_data_dir
 from config.base_config import BaseConfig
@@ -124,10 +124,11 @@ def main():
     print(f"Batch size: {args.batch_size}")
     
     # Get data loader
-    test_loader = get_dataloader(
+    test_loader = DeepfakeDataset.get_dataloader(
         data_path=args.data_path,
         batch_size=args.batch_size,
-        shuffle=False,
+        num_workers=4,
+        image_size=224,
         train=False
     )
     
