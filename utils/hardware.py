@@ -1,18 +1,7 @@
 import torch
 import psutil
-import os
-from typing import Dict, Any, Optional
 import gc
-from dataclasses import dataclass
-
-@dataclass
-class HardwareStats:
-    gpu_utilization: Optional[float] = None
-    gpu_memory_used: Optional[float] = None
-    gpu_memory_total: Optional[float] = None
-    cpu_utilization: float = 0.0
-    ram_used: float = 0.0
-    ram_total: float = 0.0
+from typing import Dict, Any
 
 def get_device() -> str:
     """Get the device to use for training (cuda or cpu)."""
@@ -23,90 +12,53 @@ def get_device() -> str:
 class HardwareManager:
     def __init__(self):
         """Initialize hardware manager."""
-        self.device = get_device()
+        # Set up device
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.gpu_available = torch.cuda.is_available()
         
+        # Get GPU info if available
         if self.gpu_available:
             self.gpu_name = torch.cuda.get_device_name(0)
             self.gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / 1e9  # Convert to GB
         else:
             self.gpu_name = None
             self.gpu_memory_total = None
-        
+            
+        # Set up mixed precision
         self.mixed_precision = self._setup_mixed_precision()
+        
+        # Set up memory optimization
         self._setup_memory_optimization()
         
-    def _get_device(self) -> torch.device:
-        """Detect and return the best available device."""
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        elif hasattr(torch, 'xpu') and torch.xpu.is_available():
-            return torch.device("xpu")
-        else:
-            return torch.device("cpu")
-            
     def _setup_mixed_precision(self) -> bool:
-        """Setup mixed precision training if supported."""
-        if self.device.type == "cuda" and torch.cuda.is_available():
+        """Set up mixed precision training."""
+        if self.gpu_available and torch.cuda.is_available():
             return True
         return False
         
     def _setup_memory_optimization(self):
-        """Apply memory optimizations based on device."""
-        if self.device.type == "cuda":
+        """Set up memory optimization settings."""
+        if self.gpu_available:
             # Empty CUDA cache
             torch.cuda.empty_cache()
-            # Set memory allocation to TensorFloat-32
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            # Enable cudnn benchmarking for faster training
-            torch.backends.cudnn.benchmark = True
+            # Run garbage collector
+            gc.collect()
             
-    def get_hardware_stats(self) -> HardwareStats:
-        """Get current hardware utilization statistics."""
-        stats = HardwareStats()
-        
-        # CPU and RAM stats
-        stats.cpu_utilization = psutil.cpu_percent()
-        ram = psutil.virtual_memory()
-        stats.ram_used = ram.used / (1024 ** 3)  # Convert to GB
-        stats.ram_total = ram.total / (1024 ** 3)
-        
-        # GPU stats if available
-        if self.device.type == "cuda":
-            try:
-                gpu_stats = torch.cuda.get_device_properties(0)
-                stats.gpu_memory_total = gpu_stats.total_memory / (1024 ** 3)
-                stats.gpu_memory_used = (torch.cuda.memory_allocated() + 
-                                       torch.cuda.memory_reserved()) / (1024 ** 3)
-                stats.gpu_utilization = torch.cuda.utilization()
-            except:
-                pass
-                
-        return stats
-        
-    def optimize_memory(self):
-        """Perform memory optimization."""
-        gc.collect()
-        if self.device.type == "cuda":
-            torch.cuda.empty_cache()
-            
-    def get_device_info(self) -> Dict[str, Any]:
-        """Get detailed device information."""
-        info = {
-            'device_type': self.device.type,
-            'mixed_precision': self.mixed_precision,
+    def get_hardware_stats(self) -> Dict[str, float]:
+        """Get current hardware statistics."""
+        stats = {
+            'cpu_utilization': psutil.cpu_percent(),
+            'ram_used': psutil.virtual_memory().used / 1e9,  # Convert to GB
+            'ram_total': psutil.virtual_memory().total / 1e9  # Convert to GB
         }
         
-        if self.device.type == "cuda":
-            gpu_props = torch.cuda.get_device_properties(0)
-            info.update({
-                'gpu_name': gpu_props.name,
-                'gpu_memory': f"{gpu_props.total_memory / (1024**3):.1f}GB",
-                'cuda_version': torch.version.cuda,
+        if self.gpu_available:
+            stats.update({
+                'gpu_memory_used': torch.cuda.memory_allocated(0) / 1e9,  # Convert to GB
+                'gpu_memory_total': self.gpu_memory_total
             })
             
-        return info
+        return stats
         
     def print_hardware_info(self):
         """Print hardware configuration information."""
@@ -119,4 +71,10 @@ class HardwareManager:
         print(f"├── Mixed Precision: {'Enabled' if self.mixed_precision else 'Disabled'}")
         print(f"├── CPU Usage: {psutil.cpu_percent()}%")
         ram = psutil.virtual_memory()
-        print(f"└── RAM Usage: {ram.used/1e9:.1f}GB/{ram.total/1e9:.1f}GB") 
+        print(f"└── RAM Usage: {ram.used/1e9:.1f}GB/{ram.total/1e9:.1f}GB")
+        
+    def optimize_memory(self):
+        """Optimize memory usage."""
+        if self.gpu_available:
+            torch.cuda.empty_cache()
+        gc.collect()

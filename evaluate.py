@@ -116,6 +116,9 @@ def main():
     config = Config()
     config.model.architecture = args.model
     
+    # Add device to config
+    config.model.device = hw_manager.device
+    
     # Load model
     model = get_model(args.model, config=config.model.__dict__)
     checkpoint = torch.load(args.checkpoint, map_location=hw_manager.device)
