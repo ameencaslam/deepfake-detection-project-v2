@@ -12,6 +12,7 @@ from config.paths import DRIVE_PATH
 
 class ProjectBackup:
     def __init__(self, base_path: str, use_drive: bool = True):
+        """Initialize backup manager."""
         self.base_path = Path(base_path)
         self.use_drive = use_drive
         self.drive_path = Path(DRIVE_PATH)
@@ -22,6 +23,7 @@ class ProjectBackup:
         
         if self.use_drive:
             self._setup_drive()
+            self.restore_latest_backup()
             
     def _setup_drive(self):
         """Setup Google Drive connection."""
@@ -42,6 +44,74 @@ class ProjectBackup:
             self.logger.error(f"Failed to setup Google Drive: {str(e)}")
             self.use_drive = False
             
+    def restore_latest_backup(self):
+        """Restore the latest backup from Drive."""
+        if not self.use_drive:
+            return
+            
+        try:
+            # Find latest backup zip
+            backup_pattern = str(self.drive_path / "deepfake_project_backup_*.zip")
+            backup_files = glob.glob(backup_pattern)
+            
+            if not backup_files:
+                self.logger.info("No backup files found in Drive")
+                return
+                
+            # Get latest backup by timestamp in filename
+            latest_backup = max(backup_files, key=os.path.getctime)
+            self.logger.info(f"Found latest backup: {latest_backup}")
+            
+            # Create temporary extraction directory
+            temp_dir = self.base_path / "temp_restore"
+            temp_dir.mkdir(exist_ok=True)
+            
+            # Extract backup
+            with zipfile.ZipFile(latest_backup, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
+                
+            # Move files to correct locations
+            self._restore_from_temp(temp_dir)
+            
+            # Cleanup
+            shutil.rmtree(temp_dir)
+            self.logger.info("Successfully restored from latest backup")
+            
+        except Exception as e:
+            self.logger.error(f"Error restoring from backup: {str(e)}")
+            
+    def _restore_from_temp(self, temp_dir: Path):
+        """Restore files from temporary directory to their proper locations."""
+        # Restore code files
+        for py_file in temp_dir.rglob("*.py"):
+            relative_path = py_file.relative_to(temp_dir)
+            target_path = self.base_path / relative_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(py_file, target_path)
+            
+        # Restore checkpoints
+        checkpoint_dir = temp_dir / "checkpoints"
+        if checkpoint_dir.exists():
+            target_checkpoint_dir = self.base_path / "checkpoints"
+            if target_checkpoint_dir.exists():
+                shutil.rmtree(target_checkpoint_dir)
+            shutil.copytree(checkpoint_dir, target_checkpoint_dir)
+            
+        # Restore configs
+        for config_file in temp_dir.rglob("*.json"):
+            relative_path = config_file.relative_to(temp_dir)
+            target_path = self.base_path / relative_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(config_file, target_path)
+            
+        # Restore dataset info
+        dataset_info_dir = temp_dir / "dataset_info"
+        if dataset_info_dir.exists():
+            for info_file in dataset_info_dir.glob("*"):
+                target_path = Path(os.path.dirname(self.base_path)) / "dataset" / info_file.name
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(info_file, target_path)
+                
     def _get_important_files(self) -> Dict[str, List[str]]:
         """Get list of important files to backup."""
         files = {
@@ -82,7 +152,7 @@ class ProjectBackup:
         if results_path.exists():
             for result_file in results_path.rglob("*.*"):
                 files['results'].append(str(result_file))
-
+                
         # Dataset split information
         data_path = Path(os.path.join(self.base_path.parent, 'dataset'))
         split_info_file = data_path / 'split_info.json'
@@ -122,63 +192,6 @@ class ProjectBackup:
             
         return str(zip_path)
         
-    def restore_from_backup(self, zip_path: Optional[str] = None) -> bool:
-        """Restore project from backup."""
-        # Find latest backup if not specified
-        if zip_path is None:
-            # Check working directory
-            local_backups = list(self.base_path.glob("deepfake_project_backup_*.zip"))
-            drive_backups = []
-            
-            # Check Drive
-            if self.use_drive and self.drive_path.exists():
-                drive_backups = list(self.drive_path.glob("deepfake_project_backup_*.zip"))
-                
-            all_backups = local_backups + drive_backups
-            if not all_backups:
-                self.logger.error("No backup files found")
-                return False
-                
-            # Get latest backup
-            zip_path = str(max(all_backups, key=os.path.getctime))
-            
-        if not os.path.exists(zip_path):
-            self.logger.error(f"Backup file not found: {zip_path}")
-            return False
-            
-        self.logger.info(f"Restoring from backup: {zip_path}")
-        
-        # Create temporary extraction directory
-        temp_dir = self.base_path / "temp_restore"
-        temp_dir.mkdir(exist_ok=True)
-        
-        try:
-            # Extract files
-            with zipfile.ZipFile(zip_path, 'r') as zipf:
-                zipf.extractall(temp_dir)
-                
-            # Move files to correct locations
-            for item in temp_dir.iterdir():
-                target = self.base_path / item.name
-                if target.exists():
-                    if target.is_dir():
-                        shutil.rmtree(target)
-                    else:
-                        target.unlink()
-                shutil.move(str(item), str(target))
-                
-            self.logger.info("Restore completed successfully")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error during restore: {str(e)}")
-            return False
-            
-        finally:
-            # Cleanup
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
-                
     def backup_to_drive(self, file_path: str, category: str, model_name: Optional[str] = None):
         """Backup specific file to Drive."""
         if not self.use_drive:

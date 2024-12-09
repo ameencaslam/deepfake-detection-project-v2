@@ -55,14 +55,18 @@ def main():
 
     # Setup
     setup_logging()
+    
+    # Initialize backup system first (this will restore from latest backup if available)
+    backup_manager = ProjectBackup(PROJECT_ROOT, use_drive=args.drive)
+    
+    # Now setup paths and validate dataset (after potential restore)
     setup_paths()
     validate_dataset()
-    use_drive = setup_drive(args.drive)
 
     # Initialize configuration
     config = Config(
         base_path=PROJECT_ROOT,
-        use_drive=use_drive
+        use_drive=args.drive
     )
 
     # Update batch size if provided
@@ -76,6 +80,10 @@ def main():
                 train_model(model_name, config)
     else:
         train_model(args.model, config)
+        
+    # Create new backup after training
+    backup_manager.create_backup()
+    backup_manager.clean_old_backups()
 
 if __name__ == '__main__':
     try:
