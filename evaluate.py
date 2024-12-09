@@ -4,12 +4,21 @@ from pathlib import Path
 from tqdm import tqdm
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
+import logging
 
 from models.model_registry import get_model, MODEL_REGISTRY
 from utils.dataset import DeepfakeDataset
 from utils.hardware import HardwareManager
-from config.paths import get_checkpoint_dir, get_data_dir
+from utils.backup import ProjectBackup
+from config.paths import get_checkpoint_dir, get_data_dir, PROJECT_ROOT
 from config.base_config import Config
+
+def setup_logging():
+    """Setup logging configuration."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Evaluate deepfake detection model')
@@ -30,24 +39,10 @@ def parse_args():
                        help='Batch size for evaluation')
     parser.add_argument('--image_size', type=int, default=Config().data.image_size,
                        help='Input image size')
+    parser.add_argument('--drive', type=bool, default=True,
+                       help='Use Google Drive for backup')
     
     args = parser.parse_args()
-    
-    # If checkpoint not specified, find latest for the model
-    if args.checkpoint is None:
-        checkpoint_dir = Path(default_checkpoint_dir) / args.model
-        if not checkpoint_dir.exists():
-            raise ValueError(f"No checkpoints found for model {args.model} in {checkpoint_dir}")
-        
-        checkpoints = list(checkpoint_dir.glob("*.pth"))
-        if not checkpoints:
-            raise ValueError(f"No checkpoint files found in {checkpoint_dir}")
-        
-        # Get latest checkpoint by modification time
-        latest = max(checkpoints, key=lambda x: x.stat().st_mtime)
-        args.checkpoint = str(latest)
-        print(f"Using latest checkpoint: {args.checkpoint}")
-    
     return args
 
 def evaluate(model, dataloader, device):
@@ -106,7 +101,28 @@ def compute_metrics(predictions, labels, probabilities):
     return metrics
 
 def main():
+    # Setup logging
+    setup_logging()
+    
+    # Parse arguments
     args = parse_args()
+    
+    # Initialize backup system first (this will restore from latest backup if available)
+    backup_manager = ProjectBackup(PROJECT_ROOT, use_drive=args.drive)
+    
+    # Now check for checkpoints (after potential restore)
+    checkpoint_dir = Path(get_checkpoint_dir()) / args.model
+    if not checkpoint_dir.exists():
+        raise ValueError(f"No checkpoints found for model {args.model} in {checkpoint_dir}")
+    
+    checkpoints = list(checkpoint_dir.glob("*.pth"))
+    if not checkpoints:
+        raise ValueError(f"No checkpoint files found in {checkpoint_dir}")
+    
+    # Get latest checkpoint by modification time if not specified
+    if args.checkpoint is None:
+        args.checkpoint = str(max(checkpoints, key=lambda x: x.stat().st_mtime))
+        print(f"Using latest checkpoint: {args.checkpoint}")
     
     # Initialize hardware
     hw_manager = HardwareManager()
@@ -115,8 +131,6 @@ def main():
     # Create config for model initialization
     config = Config()
     config.model.architecture = args.model
-    
-    # Add device to config
     config.model.device = hw_manager.device
     
     # Load model
@@ -161,4 +175,10 @@ def main():
     print(f"False Negatives: {metrics['false_negatives']}")
 
 if __name__ == '__main__':
-    main() 
+    try:
+        main()
+    except KeyboardInterrupt:
+        logging.info("\nEvaluation interrupted by user")
+    except Exception as e:
+        logging.error(f"\nError during evaluation: {str(e)}")
+        raise 
