@@ -18,13 +18,22 @@ def setup_drive(use_drive: bool):
     """Setup Google Drive if needed."""
     if use_drive:
         try:
-            drive.mount('/content/drive')
+            # Check if drive is already mounted
+            if not os.path.exists('/content/drive/MyDrive'):
+                drive.mount('/content/drive')
+            
+            # Verify drive access
+            if not os.path.exists('/content/drive/MyDrive'):
+                logging.error("Drive mount point exists but MyDrive is not accessible")
+                return False
+                
             os.makedirs(DRIVE_PATH, exist_ok=True)
-            logging.info("Google Drive mounted successfully")
-        except:
-            logging.warning("Failed to mount Google Drive. Continuing without it.")
+            logging.info("Google Drive mounted and verified successfully")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to setup Google Drive: {str(e)}")
             return False
-    return use_drive
+    return False
 
 def train_model(model_name: str, config: Config):
     """Train a single model."""

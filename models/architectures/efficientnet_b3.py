@@ -33,7 +33,7 @@ class EfficientNetModel(BaseModel):
             self.feature_dim = features.shape[1]  # Get channel dimension
         
         # Feature processing
-        self.feature_norm = nn.LayerNorm(self.feature_dim)
+        self.feature_norm = nn.LayerNorm(512)
         self.feature_dropout = nn.Dropout(dropout_rate)
         
         # Multi-scale feature aggregation
@@ -43,7 +43,6 @@ class EfficientNetModel(BaseModel):
         # Additional feature processing
         self.feature_reduction = nn.Sequential(
             nn.Linear(self.feature_dim * 2, 512),
-            nn.LayerNorm(512),
             nn.GELU(),
             nn.Dropout(dropout_rate * 0.5)
         )

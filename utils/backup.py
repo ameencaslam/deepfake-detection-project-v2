@@ -26,11 +26,20 @@ class ProjectBackup:
     def _setup_drive(self):
         """Setup Google Drive connection."""
         try:
-            drive.mount('/content/drive')
+            # Check if drive is already mounted
+            if not os.path.exists('/content/drive/MyDrive'):
+                drive.mount('/content/drive')
+            
+            # Verify drive access
+            if not os.path.exists('/content/drive/MyDrive'):
+                self.logger.error("Drive mount point exists but MyDrive is not accessible")
+                self.use_drive = False
+                return
+                
             self.drive_path.mkdir(parents=True, exist_ok=True)
-            self.logger.info("Google Drive mounted successfully")
+            self.logger.info("Google Drive mounted and verified successfully")
         except Exception as e:
-            self.logger.warning(f"Failed to mount Google Drive: {str(e)}")
+            self.logger.error(f"Failed to setup Google Drive: {str(e)}")
             self.use_drive = False
             
     def _get_important_files(self) -> Dict[str, List[str]]:
