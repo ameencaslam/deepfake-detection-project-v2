@@ -63,11 +63,11 @@ def setup_drive(use_drive: bool):
             return False
     return False
 
-def train_model(model_name: str, config: Config):
+def train_model(model_name: str, config: Config, resume: bool = False):
     """Train a single model."""
     logging.info(f"Training model: {model_name}")
     config.model.architecture = model_name
-    train(config)
+    train(config, resume=resume)
 
 def main():
     # Parse arguments
@@ -87,6 +87,7 @@ def main():
 
     # Setup
     setup_logging()
+    logging.info(f"Resume training: {args.resume}")
     
     # Setup Drive if needed
     drive_available = False
@@ -124,9 +125,9 @@ def main():
     if args.model.lower() == 'all':
         for model_name in MODELS.keys():
             if model_name != 'all':
-                train_model(model_name, config)
+                train_model(model_name, config, resume=args.resume)
     else:
-        train_model(args.model, config)
+        train_model(args.model, config, resume=args.resume)
         
     # Create new backup after training
     if drive_available:
