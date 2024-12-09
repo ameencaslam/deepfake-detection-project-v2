@@ -130,14 +130,21 @@ def main():
     
     # Create config for model initialization
     config = Config()
-    config.model.architecture = args.model
-    config.model.device = hw_manager.device
     
-    # Load model
-    model = get_model(args.model, config=config.model.__dict__)
+    # Load model with proper parameters
+    model = get_model(
+        args.model,
+        pretrained=config.model.pretrained,
+        num_classes=config.model.num_classes,
+        dropout_rate=config.model.dropout_rate
+    )
+    
+    # Move model to device
+    model = model.to(hw_manager.device)
+    
+    # Load checkpoint
     checkpoint = torch.load(args.checkpoint, map_location=hw_manager.device)
     model.load_state_dict(checkpoint['model_state_dict'])
-    model = model.to(hw_manager.device)
     
     print(f"\nEvaluating {args.model} model")
     print(f"Checkpoint: {args.checkpoint}")
