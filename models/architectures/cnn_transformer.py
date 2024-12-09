@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import timm
 from typing import Dict, Any, Tuple
-from ..base_model import BaseModel
-from ...utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
+from models.base_model import BaseModel
+from utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
 
 class TransformerBlock(nn.Module):
     def __init__(self, dim: int, num_heads: int = 8, mlp_ratio: float = 4.0, dropout: float = 0.1):

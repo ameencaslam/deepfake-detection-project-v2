@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import timm
 from typing import Dict, Any, Tuple
-from ..base_model import BaseModel
-from ...utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
+from models.base_model import BaseModel
+from utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
 import torch.fft as fft
 
 class FrequencyBranch(nn.Module):

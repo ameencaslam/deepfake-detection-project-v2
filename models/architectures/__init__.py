@@ -1,11 +1,11 @@
-from typing import Dict, Any
-import torch.nn as nn
-from .efficientnet_b3 import EfficientNetModel
-from .swin_transformer import SwinTransformerModel
-from .two_stream import TwoStreamModel
-from .xception import XceptionModel
-from .cnn_transformer import CNNTransformerModel
-from .cross_attention import CrossAttentionModel
+"""Model architectures package."""
+
+from models.architectures.efficientnet_b3 import EfficientNetModel
+from models.architectures.swin_transformer import SwinTransformerModel
+from models.architectures.two_stream import TwoStreamModel
+from models.architectures.xception import XceptionModel
+from models.architectures.cnn_transformer import CNNTransformerModel
+from models.architectures.cross_attention import CrossAttentionModel
 
 MODEL_REGISTRY = {
     'efficientnet': EfficientNetModel,
@@ -16,22 +16,22 @@ MODEL_REGISTRY = {
     'cross_attention': CrossAttentionModel
 }
 
-def get_model(architecture: str, **kwargs) -> nn.Module:
-    """
-    Factory function to get the specified model architecture.
-    
-    Args:
-        architecture: Name of the model architecture
-        **kwargs: Additional arguments to pass to the model constructor
-        
-    Returns:
-        Initialized model
-    """
+def get_model(architecture: str, **kwargs):
+    """Get model from registry by name."""
     if architecture not in MODEL_REGISTRY:
         raise ValueError(
             f"Unknown architecture: {architecture}. "
             f"Available architectures: {list(MODEL_REGISTRY.keys())}"
         )
-        
-    model_class = MODEL_REGISTRY[architecture]
-    return model_class(**kwargs) 
+    return MODEL_REGISTRY[architecture](**kwargs)
+
+__all__ = [
+    'EfficientNetModel',
+    'SwinTransformerModel',
+    'TwoStreamModel',
+    'XceptionModel',
+    'CNNTransformerModel',
+    'CrossAttentionModel',
+    'get_model',
+    'MODEL_REGISTRY'
+] 
