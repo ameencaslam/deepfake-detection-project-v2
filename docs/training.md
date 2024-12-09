@@ -1,198 +1,102 @@
-# Training and Evaluation Guide
+# Training Guide
 
-## Training Scripts
+This document describes the training process and available options.
 
-### main.py (High-Level Interface)
+## Basic Training
 
-For quick training and multiple model management:
-
-```bash
-# Train all models
-python main.py --model all
-
-# Train single model with Drive backup
-python main.py --model efficientnet --drive True
-
-# Custom batch size
-python main.py --model swin --batch 64
-```
-
-Available arguments:
-
-- `--model`: Model to train ('all' or specific model name)
-- `--drive`: Use Google Drive backup (default: True)
-- `--batch`: Batch size (default: 32)
-
-### train.py (Detailed Control)
-
-For fine-grained control over training:
+The simplest way to train a model:
 
 ```bash
-# Basic training
-python train.py --model efficientnet --data_path /path/to/data
-
-# Advanced options
-python train.py \
-    --model efficientnet \
-    --data_path /path/to/data \
-    --batch_size 32 \
-    --learning_rate 1e-4 \
-    --num_epochs 50 \
-    --dropout_rate 0.3 \
-    --label_smoothing 0.1 \
-    --weight_decay 0.01
+python run.py train
 ```
 
-## Script Relationships
+This will use the default settings:
 
-- `main.py` calls `train.py` internally
-- `main.py` handles project-wide settings
-- `train.py` handles detailed training logic
-- Both can be used independently
+- Model: EfficientNet-B3
+- Batch size: 32
+- Learning rate: 0.001
+- Epochs: 100
+- Device: CUDA (if available)
+
+## Advanced Options
+
+### Model Selection
+
+```bash
+python run.py train --model swin
+```
+
+Available models:
+
+- `swin`: Swin Transformer
+- `two_stream`: Two-Stream Network
+- `xception`: Xception
+- `cnn_transformer`: CNN-Transformer Hybrid
+- `cross_attention`: Cross-Attention Model
+- `efficientnet`: EfficientNet-B3
+
+### Training Parameters
+
+```bash
+python run.py train \
+    --model xception \
+    --batch 64 \
+    --epochs 200 \
+    --lr 0.001
+```
+
+### Hardware Options
+
+```bash
+# Use CPU
+python run.py train --device cpu
+
+# Use GPU with memory limit
+python run.py train --device cuda --gpu-mem-frac 0.8
+```
 
 ## Training Features
 
-### 1. Optimization
+1. **Automatic Checkpointing**
 
-- Mixed precision training
-- Layer-wise learning rates
-- One-cycle learning rate policy
-- Weight decay with AdamW
+   - Best model saved automatically
+   - Regular interval backups
+   - Checkpoint naming includes metrics
 
-### 2. Regularization
+2. **Early Stopping**
 
-- Label smoothing
-- Dropout
-- Layer normalization
-- Stochastic depth (model specific)
+   - Monitors validation loss
+   - Prevents overfitting
+   - Configurable patience
 
-### 3. Monitoring
+3. **Mixed Precision Training**
 
-- Training loss
-- Validation metrics
-- Learning rate schedule
-- Memory usage
+   - Automatic mixed precision
+   - Faster training
+   - Lower memory usage
 
-## Evaluation
-
-### Quick Evaluation
-
-```bash
-# Evaluate using latest checkpoint
-python evaluate.py --model efficientnet
-
-# Evaluate specific checkpoint
-python evaluate.py \
-    --model efficientnet \
-    --checkpoint path/to/checkpoint.pth
-```
-
-### Detailed Evaluation
-
-```bash
-python evaluate.py \
-    --model efficientnet \
-    --checkpoint path/to/checkpoint.pth \
-    --data_path /path/to/test/data \
-    --batch_size 32
-```
-
-## Model-Specific Training
-
-### EfficientNet
-
-```bash
-python train.py \
-    --model efficientnet \
-    --dropout_rate 0.3 \
-    --label_smoothing 0.1
-```
-
-### Swin Transformer
-
-```bash
-python train.py \
-    --model swin \
-    --window_size 7 \
-    --num_heads 8
-```
+4. **Visualization**
+   - Training metrics
+   - Learning rate schedule
+   - Confusion matrices
+   - Feature visualizations
 
 ## Best Practices
 
-### Using main.py
+1. **Data Preparation**
 
-1. Start with `main.py` for quick experiments
-2. Use `--model all` to train all models
-3. Enable Drive backup for important runs
-4. Adjust batch size if needed
+   - Use balanced dataset
+   - Apply appropriate augmentations
+   - Verify data quality
 
-### Using train.py
+2. **Model Selection**
 
-1. Use for detailed parameter control
-2. Monitor validation metrics
-3. Use appropriate batch size
-4. Enable mixed precision training
+   - EfficientNet: Good baseline
+   - Swin: Better accuracy
+   - CNN-Transformer: Best accuracy but slower
 
-### Evaluation
-
-1. Use multiple test sets
-2. Check all metrics
-3. Analyze confusion matrix
-4. Compare with baselines
-
-## Common Issues
-
-### Out of Memory
-
-- Reduce batch size
-- Enable mixed precision
-- Check input resolution
-
-### Poor Convergence
-
-- Adjust learning rate
-- Modify optimizer settings
-- Check data preprocessing
-- Verify loss computation
-
-## Getting Help
-
-```bash
-# View high-level options
-python main.py --help
-
-# View detailed training options
-python train.py --help
-
-# View evaluation options
-python evaluate.py --help
-```
-
-## Checkpoints
-
-### Location
-
-- Default: `checkpoints/<model_name>/`
-- Latest used automatically
-- Specific checkpoint via `--checkpoint`
-
-### Contents
-
-- Model state
-- Optimizer state
-- Training epoch
-- Performance metrics
-
-## Data Management
-
-### Training Data
-
-- Set via `--data_path`
-- Default from config
-- Supports multiple formats
-
-### Validation/Test
-
-- Automatic split
-- Custom test set
-- Balanced evaluation
+3. **Training Tips**
+   - Start with default parameters
+   - Monitor validation metrics
+   - Use appropriate batch size
+   - Enable mixed precision

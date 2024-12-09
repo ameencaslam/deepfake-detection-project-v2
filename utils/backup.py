@@ -1,151 +1,185 @@
+"""Simple backup utility for project files."""
+
 import os
+import shutil
 import zipfile
 import json
-import shutil
-from datetime import datetime
-from typing import Dict, List, Optional, Union
 from pathlib import Path
+from datetime import datetime
 import logging
-from google.colab import drive
-import glob
-from config.paths import DRIVE_PATH
+from typing import List, Optional, Dict
 
-class ProjectBackup:
-    def __init__(self, base_path: Union[str, Path], use_drive: bool = True):
-        """Initialize backup manager."""
-        self.base_path = Path(base_path)
-        self.use_drive = use_drive
-        self.drive_path = Path(DRIVE_PATH) if use_drive else None
-        self.logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
+def get_files_to_backup(project_dir: str, exclude_patterns: Optional[List[str]] = None) -> List[str]:
+    """Get list of files to backup, excluding specified patterns."""
+    if exclude_patterns is None:
+        exclude_patterns = [
+            'models/checkpoints/*',  # Exclude all checkpoints
+            '*.pyc',                 # Exclude Python cache
+            '__pycache__',          # Exclude Python cache directories
+            '.git',                 # Exclude git directory
+            '*.zip'                 # Exclude zip files
+        ]
+    
+    files_to_backup = []
+    project_dir = Path(project_dir)
+    
+    # Add best and last checkpoints back if they exist
+    checkpoint_dir = project_dir / 'models' / 'checkpoints'
+    if checkpoint_dir.exists():
+        best_checkpoint = checkpoint_dir / 'best_model.pth'
+        last_checkpoint = checkpoint_dir / 'last_model.pth'
+        if best_checkpoint.exists():
+            files_to_backup.append(str(best_checkpoint.relative_to(project_dir)))
+        if last_checkpoint.exists():
+            files_to_backup.append(str(last_checkpoint.relative_to(project_dir)))
+    
+    for root, dirs, files in os.walk(project_dir):
+        # Convert to Path objects for easier manipulation
+        root_path = Path(root)
+        rel_path = root_path.relative_to(project_dir)
         
-    def create_backup(self, include_checkpoints: bool = True):
-        """Create a backup of important project files."""
-        try:
-            # Get list of files to backup
-            files = self._get_important_files()
+        # Skip excluded directories
+        dirs[:] = [d for d in dirs if not any(
+            p in str(rel_path / d) for p in exclude_patterns
+        )]
+        
+        # Add non-excluded files
+        for file in files:
+            file_path = rel_path / file
+            if not any(p in str(file_path) for p in exclude_patterns):
+                files_to_backup.append(str(file_path))
+    
+    return files_to_backup
+
+def save_split_info(project_dir: str, zip_file: zipfile.ZipFile):
+    """Save dataset split information."""
+    project_dir = Path(project_dir)
+    data_dir = project_dir / 'data'
+    
+    if not data_dir.exists():
+        return
+    
+    split_info = {
+        'train': {},
+        'val': {},
+        'test': {}
+    }
+    
+    # Collect file information for each split
+    for split in ['train', 'val', 'test']:
+        split_dir = data_dir / split
+        if not split_dir.exists():
+            continue
             
-            # Create backup filename with timestamp
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup_name = f"deepfake_project_backup_{timestamp}.zip"
-            backup_path = self.base_path / backup_name
-            
-            # Create zip file
-            with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
-                # Add files by category
-                for category, file_list in files.items():
-                    if not include_checkpoints and category == 'checkpoints':
-                        continue
-                    for file_path in file_list:
-                        arcname = os.path.relpath(file_path, str(self.base_path))
-                        zip_ref.write(file_path, arcname)
-                        
-            self.logger.info(f"Created backup: {backup_path}")
-            
-            # Copy to Drive if enabled
-            if self.use_drive:
-                drive_backup_path = self.drive_path / backup_name
-                shutil.copy2(backup_path, drive_backup_path)
-                self.logger.info(f"Copied backup to Drive: {drive_backup_path}")
+        for label in ['real', 'fake']:
+            label_dir = split_dir / label
+            if not label_dir.exists():
+                continue
                 
-        except Exception as e:
-            self.logger.error(f"Error creating backup: {str(e)}")
-            raise
-            
-    def _get_important_files(self) -> Dict[str, List[str]]:
-        """Get list of important files to backup."""
-        files = {
-            'code': [],
-            'checkpoints': [],
-            'configs': [],
-            'logs': [],
-            'results': [],
-            'dataset_info': []
-        }
+            # Store filenames and their modification times
+            split_info[split][label] = {
+                str(f.relative_to(data_dir)): f.stat().st_mtime
+                for f in label_dir.rglob('*')
+                if f.is_file()
+            }
+    
+    # Save split info to zip
+    zip_file.writestr('split_info.json', json.dumps(split_info, indent=2))
+
+def verify_split_info(restore_dir: str, zip_file: zipfile.ZipFile) -> bool:
+    """Verify dataset split integrity after restore."""
+    try:
+        with zip_file.open('split_info.json') as f:
+            split_info = json.loads(f.read())
+    except KeyError:
+        logger.warning("No split information found in backup")
+        return True
+    
+    restore_dir = Path(restore_dir)
+    data_dir = restore_dir / 'data'
+    
+    if not data_dir.exists():
+        logger.warning("No data directory found after restore")
+        return True
+    
+    # Verify each file in split info exists
+    for split, labels in split_info.items():
+        for label, files in labels.items():
+            for file_path in files:
+                full_path = data_dir / file_path
+                if not full_path.exists():
+                    logger.error(f"Missing file after restore: {file_path}")
+                    return False
+    
+    return True
+
+def create_backup(project_dir: str, backup_path: Optional[str] = None) -> str:
+    """Create a zip backup of the project.
+    
+    Args:
+        project_dir: Directory to backup
+        backup_path: Optional path for backup file
         
-        # Python files
-        for py_file in self.base_path.rglob("*.py"):
-            files['code'].append(str(py_file))
-            
-        # Latest and best checkpoints
-        checkpoint_path = self.base_path / 'checkpoints'
-        if checkpoint_path.exists():
-            for model_dir in checkpoint_path.iterdir():
-                if model_dir.is_dir():
-                    for model_type in ['latest', 'best']:
-                        checkpoints = list(model_dir.glob(f"*{model_type}*.pth"))
-                        if checkpoints:
-                            files['checkpoints'].extend([str(cp) for cp in checkpoints])
-                
-        # Config files
-        for config_file in self.base_path.rglob("*.json"):
-            files['configs'].append(str(config_file))
-            
-        # Log files
-        log_path = self.base_path / 'logs'
-        if log_path.exists():
-            for log_file in log_path.glob("*.log"):
-                files['logs'].append(str(log_file))
-            
-        # Results
-        results_path = self.base_path / 'results'
-        if results_path.exists():
-            for result_file in results_path.rglob("*.*"):
-                files['results'].append(str(result_file))
-                
-        # Dataset split information
-        data_path = Path(os.path.join(self.base_path.parent, 'dataset'))
-        split_info_file = data_path / 'split_info.json'
-        if split_info_file.exists():
-            files['dataset_info'].append(str(split_info_file))
-            
-        return files
+    Returns:
+        Path to created backup file
+    """
+    project_dir = Path(project_dir)
+    
+    # Generate backup filename with timestamp if not provided
+    if backup_path is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_path = project_dir / f'project_backup_{timestamp}.zip'
+    
+    backup_path = Path(backup_path)
+    
+    try:
+        # Get files to backup
+        files_to_backup = get_files_to_backup(project_dir)
         
-    def backup_to_drive(self, file_path: str, category: str, model_name: Optional[str] = None):
-        """Backup specific file to Drive."""
-        if not self.use_drive:
-            return
+        # Create zip file
+        with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Save data split information
+            save_split_info(project_dir, zf)
             
-        drive_category_path = self.drive_path / category
-        if model_name:
-            drive_category_path = drive_category_path / model_name
-        drive_category_path.mkdir(parents=True, exist_ok=True)
+            # Add project files
+            for file in files_to_backup:
+                file_path = project_dir / file
+                if file_path.exists():
+                    zf.write(file_path, file)
         
-        filename = os.path.basename(file_path)
-        drive_path = drive_category_path / filename
+        logger.info(f"Backup created successfully at: {backup_path}")
+        return str(backup_path)
         
-        shutil.copy(file_path, drive_path)
-        self.logger.info(f"Backed up to Drive: {drive_path}")
+    except Exception as e:
+        logger.error(f"Failed to create backup: {str(e)}")
+        raise
+
+def restore_backup(backup_path: str, restore_dir: str):
+    """Restore project from backup zip file.
+    
+    Args:
+        backup_path: Path to backup zip file
+        restore_dir: Directory to restore to
+    """
+    try:
+        backup_path = Path(backup_path)
+        restore_dir = Path(restore_dir)
         
-    def clean_old_backups(self, keep_last: int = 3):
-        """Clean old backup files, keeping the specified number of recent ones."""
-        # Clean local backups
-        local_backups = sorted(
-            self.base_path.glob("deepfake_project_backup_*.zip"),
-            key=os.path.getctime
-        )
+        # Create restore directory if it doesn't exist
+        restore_dir.mkdir(parents=True, exist_ok=True)
         
-        for backup in local_backups[:-keep_last]:
-            backup.unlink()
+        with zipfile.ZipFile(backup_path, 'r') as zf:
+            # Extract all files
+            zf.extractall(restore_dir)
             
-        # Clean Drive backups
-        if self.use_drive and self.drive_path.exists():
-            # Clean general backups
-            drive_backups = sorted(
-                self.drive_path.glob("deepfake_project_backup_*.zip"),
-                key=os.path.getctime
-            )
+            # Verify data split integrity
+            if not verify_split_info(restore_dir, zf):
+                raise RuntimeError("Data split verification failed")
             
-            for backup in drive_backups[:-keep_last]:
-                backup.unlink()
-                
-            # Clean model-specific checkpoints
-            checkpoint_path = self.drive_path / 'checkpoints'
-            if checkpoint_path.exists():
-                for model_dir in checkpoint_path.iterdir():
-                    if model_dir.is_dir():
-                        model_checkpoints = sorted(
-                            model_dir.glob("*.pth"),
-                            key=os.path.getctime
-                        )
-                        for checkpoint in model_checkpoints[:-keep_last]:
-                            checkpoint.unlink() 
+        logger.info(f"Project restored successfully to: {restore_dir}")
+        
+    except Exception as e:
+        logger.error(f"Failed to restore backup: {str(e)}")
+        raise 

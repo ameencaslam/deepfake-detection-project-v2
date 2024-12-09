@@ -1,145 +1,69 @@
-# Models Documentation
+# Model Architectures
 
-## Available Models
+This document describes the available model architectures for deepfake detection.
 
-### 1. Swin Transformer (`swin`)
+## Swin Transformer
 
-- Vision transformer with shifted windows
+A hierarchical vision transformer using shifted windows for efficient attention computation.
+
+**Key Features**:
+
 - Hierarchical feature learning
+- Shifted window-based self-attention
+- Linear computational complexity
+- State-of-the-art performance on vision tasks
+
+## Two-Stream Network
+
+Processes both spatial and frequency domain information for robust deepfake detection.
+
+**Key Features**:
+
+- Parallel spatial and frequency streams
+- DCT-based frequency analysis
+- Feature fusion module
+- Attention-based stream weighting
+
+## Xception
+
+Modified Xception architecture with enhanced feature extraction capabilities.
+
+**Key Features**:
+
+- Depthwise separable convolutions
+- Multi-scale feature processing
+- Skip connections
+- Efficient parameter usage
+
+## CNN-Transformer Hybrid
+
+Combines CNN-based local feature extraction with transformer-based global reasoning.
+
+**Key Features**:
+
+- CNN backbone for local features
+- Transformer encoder for global context
+- Feature pyramid network
 - Multi-head self-attention
 
-### 2. Two-Stream Network (`two_stream`)
+## Cross-Attention Model
 
-- Spatial and frequency domain analysis
-- Dual-path architecture
-- Feature fusion mechanism
+Utilizes cross-attention mechanisms to capture relationships between real and fake patterns.
 
-### 3. Xception (`xception`)
-
-- Modified Xception architecture
-- Multi-scale feature extraction
-- Depthwise separable convolutions
-
-### 4. CNN-Transformer Hybrid (`cnn_transformer`)
-
-- Combined CNN and transformer architecture
-- Feature pyramid network
-- Cross-attention mechanism
-
-### 5. Cross-Attention Model (`cross_attention`)
+**Key Features**:
 
 - Multi-head cross-attention
-- Feature interaction learning
-- Hierarchical representation
+- Feature matching module
+- Dual-path architecture
+- Contrastive learning support
 
-### 6. EfficientNet-B3 (`efficientnet`)
+## EfficientNet-B3
 
-- Compound scaling for optimal performance
-- Multi-scale feature aggregation
-- Advanced regularization techniques
+Optimized CNN architecture with compound scaling for balanced performance.
 
-## Model Usage
+**Key Features**:
 
-### Basic Training
-
-```bash
-python train.py --model MODEL_NAME
-```
-
-### Custom Training
-
-```bash
-python train.py \
-    --model MODEL_NAME \
-    --batch_size 32 \
-    --learning_rate 1e-4 \
-    --num_epochs 50
-```
-
-### Evaluation
-
-```bash
-# Quick evaluation
-python evaluate.py --model MODEL_NAME
-
-# Custom evaluation
-python evaluate.py \
-    --model MODEL_NAME \
-    --checkpoint path/to/checkpoint.pth
-```
-
-## Model-Specific Parameters
-
-### EfficientNet
-
-```bash
-python train.py \
-    --model efficientnet \
-    --dropout_rate 0.3 \
-    --label_smoothing 0.1
-```
-
-### Swin Transformer
-
-```bash
-python train.py \
-    --model swin \
-    --window_size 7 \
-    --num_heads 8
-```
-
-### Two-Stream Network
-
-```bash
-python train.py \
-    --model two_stream \
-    --fusion_type 'concat'
-```
-
-## Model Features
-
-### Common Features
-
-- Mixed precision training
-- Label smoothing
-- Layer-wise learning rates
-- Automatic checkpoint management
-
-### Advanced Features
-
-- Multi-scale feature processing
-- Adaptive learning rate scheduling
-- Regularization techniques
-- Confusion matrix evaluation
-
-## Model Performance
-
-Each model provides:
-
-- Accuracy metrics
-- Precision and recall
-- F1 score
-- AUC-ROC curve
-- Confusion matrix
-
-## Best Practices
-
-1. **Training**
-
-   - Start with default parameters
-   - Use mixed precision training
-   - Monitor validation metrics
-   - Use appropriate batch size
-
-2. **Evaluation**
-
-   - Use multiple metrics
-   - Check confusion matrix
-   - Validate on different datasets
-   - Compare model variants
-
-3. **Optimization**
-   - Adjust learning rates
-   - Tune dropout rates
-   - Modify batch sizes
-   - Experiment with schedulers
+- Compound scaling of depth/width/resolution
+- Mobile inverted bottleneck blocks
+- Squeeze-and-excitation modules
+- Efficient parameter utilization

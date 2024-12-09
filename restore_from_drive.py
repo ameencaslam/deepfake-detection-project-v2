@@ -1,138 +1,124 @@
 import os
-import zipfile
-import shutil
-from pathlib import Path
-import glob
+import argparse
 import logging
-from datetime import datetime
+from pathlib import Path
+from typing import Optional
+from utils.backup import BackupManager
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-class DriveRestorer:
-    def __init__(self):
-        """Initialize Drive restoration paths."""
-        self.drive_path = Path('/content/drive/MyDrive/deepfake-project')
-        self.content_path = Path('/content/PROJECT-V2')
-        self.temp_dir = Path('/content/temp_restore')
-        
-    def find_latest_backup(self) -> Path:
-        """Find the latest backup zip in Drive."""
-        backup_pattern = str(self.drive_path / "deepfake_project_backup_*.zip")
-        backup_files = glob.glob(backup_pattern)
-        
-        if not backup_files:
-            raise FileNotFoundError("No backup files found in Drive")
-            
-        # Get latest backup by timestamp in filename
-        latest_backup = max(backup_files, key=os.path.getctime)
-        logger.info(f"Found latest backup: {latest_backup}")
-        return Path(latest_backup)
-        
-    def verify_zip_integrity(self, zip_path: Path) -> bool:
-        """Verify the integrity of the zip file."""
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                # Test zip file integrity
-                test_result = zip_ref.testzip()
-                if test_result is not None:
-                    logger.error(f"Corrupted file in zip: {test_result}")
-                    return False
-                    
-                # Check for essential directories/files
-                contents = zip_ref.namelist()
-                required_items = ['config/', 'models/', 'utils/', 'main.py', 'train.py']
-                missing = [item for item in required_items if not any(f.startswith(item) for f in contents)]
-                
-                if missing:
-                    logger.error(f"Missing required items in backup: {missing}")
-                    return False
-                    
-            return True
-        except Exception as e:
-            logger.error(f"Error verifying zip: {str(e)}")
-            return False
-            
-    def verify_restored_files(self) -> bool:
-        """Verify essential files and directories after restoration."""
-        required_paths = [
-            self.content_path / 'config',
-            self.content_path / 'models',
-            self.content_path / 'utils',
-            self.content_path / 'main.py',
-            self.content_path / 'train.py'
+def setup_logging():
+    """Set up logging configuration."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('restore.log')
         ]
+    )
+    return logging.getLogger(__name__)
+
+def restore_project(project_dir: str,
+                   backup_dir: str,
+                   drive_dir: Optional[str] = None,
+                   version: Optional[str] = None,
+                   target_dir: Optional[str] = None) -> bool:
+    """Restore project from backup.
+    
+    Args:
+        project_dir: Project directory
+        backup_dir: Local backup directory
+        drive_dir: Google Drive backup directory (optional)
+        version: Specific version to restore (optional)
+        target_dir: Target directory for restoration (optional)
         
-        missing = [str(path) for path in required_paths if not path.exists()]
-        if missing:
-            logger.error(f"Missing restored files/directories: {missing}")
+    Returns:
+        Success status
+    """
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Initialize backup manager
+        backup_manager = BackupManager(
+            project_dir=project_dir,
+            backup_dir=backup_dir,
+            drive_dir=drive_dir,
+            compress=True
+        )
+        
+        # List available backups
+        backups = backup_manager.list_backups()
+        if not backups:
+            logger.error("No backups found")
             return False
             
-        return True
+        # Select version to restore
+        if version is None:
+            # Get latest version
+            version = backups[-1]['version']
+            logger.info(f"Using latest backup version: {version}")
+        elif version not in {b['version'] for b in backups}:
+            logger.error(f"Backup version not found: {version}")
+            return False
+            
+        # Get backup info
+        backup_info = backup_manager.get_backup_info(version)
+        logger.info("\nRestoring backup:")
+        logger.info(f"Version: {backup_info['version']}")
+        logger.info(f"Timestamp: {backup_info['timestamp']}")
+        logger.info(f"Description: {backup_info['description']}")
+        logger.info(f"Size: {backup_info['size'] / 1e6:.1f} MB")
+        logger.info(f"Files: {backup_info['num_files']}")
         
-    def restore(self):
-        """Restore the latest backup from Drive to content directory."""
-        try:
-            # Find latest backup
-            backup_file = self.find_latest_backup()
+        # Verify backup
+        logger.info("\nVerifying backup integrity...")
+        if not backup_manager.verify_backup(version):
+            logger.error("Backup verification failed")
+            return False
             
-            # Verify zip integrity
-            logger.info("Verifying backup integrity...")
-            if not self.verify_zip_integrity(backup_file):
-                raise ValueError("Backup verification failed")
-                
-            # Create/clear temp directory
-            if self.temp_dir.exists():
-                shutil.rmtree(self.temp_dir)
-            self.temp_dir.mkdir(parents=True)
+        # Restore backup
+        logger.info("\nRestoring files...")
+        success = backup_manager.restore_backup(
+            version=version,
+            target_dir=Path(target_dir) if target_dir else None
+        )
+        
+        if success:
+            logger.info("\nRestore completed successfully")
+            return True
+        else:
+            logger.error("\nRestore failed")
+            return False
             
-            try:
-                # Extract to temp directory
-                logger.info("Extracting backup...")
-                with zipfile.ZipFile(backup_file, 'r') as zip_ref:
-                    zip_ref.extractall(self.temp_dir)
-                    
-                # Remove existing content directory if it exists
-                if self.content_path.exists():
-                    shutil.rmtree(self.content_path)
-                    
-                # Move files from temp to content directory
-                logger.info("Moving files to project directory...")
-                shutil.copytree(self.temp_dir, self.content_path)
-                
-                # Verify restored files
-                logger.info("Verifying restored files...")
-                if not self.verify_restored_files():
-                    raise ValueError("Restored files verification failed")
-                    
-                logger.info("Restoration completed successfully")
-                
-            finally:
-                # Clean up temp directory
-                if self.temp_dir.exists():
-                    shutil.rmtree(self.temp_dir)
-                    
-        except Exception as e:
-            logger.error(f"Error during restoration: {str(e)}")
-            raise
+    except Exception as e:
+        logger.error(f"Error during restore: {e}")
+        return False
 
 def main():
-    """Main function to restore from Drive."""
-    try:
-        # Check if Drive is mounted
-        if not os.path.exists('/content/drive/MyDrive'):
-            raise RuntimeError("Google Drive is not mounted. Please mount it first.")
-            
-        restorer = DriveRestorer()
-        restorer.restore()
-        
-    except Exception as e:
-        logger.error(f"Restoration failed: {str(e)}")
-        raise
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description="Restore project from backup")
+    parser.add_argument("--project-dir", type=str, required=True,
+                       help="Project directory")
+    parser.add_argument("--backup-dir", type=str, required=True,
+                       help="Local backup directory")
+    parser.add_argument("--drive-dir", type=str,
+                       help="Google Drive backup directory")
+    parser.add_argument("--version", type=str,
+                       help="Specific backup version to restore")
+    parser.add_argument("--target-dir", type=str,
+                       help="Target directory for restoration")
+    
+    args = parser.parse_args()
+    logger = setup_logging()
+    
+    success = restore_project(
+        project_dir=args.project_dir,
+        backup_dir=args.backup_dir,
+        drive_dir=args.drive_dir,
+        version=args.version,
+        target_dir=args.target_dir
+    )
+    
+    exit(0 if success else 1)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main() 
