@@ -25,12 +25,29 @@ class TrainingVisualizer:
             'learning_rates': []
         }
         
+    def _convert_to_serializable(self, obj):
+        """Convert numpy types to Python native types."""
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {key: self._convert_to_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_to_serializable(item) for item in obj]
+        return obj
+        
     def save_training_summary(self, metrics: dict, model_name: str):
         """Save training summary and plots."""
+        # Convert metrics to serializable format
+        serializable_metrics = self._convert_to_serializable(metrics)
+        
         # Save metrics
         metrics_file = self.save_dir / 'metrics.json'
         with open(metrics_file, 'w') as f:
-            json.dump(metrics, f, indent=4)
+            json.dump(serializable_metrics, f, indent=4)
             
         # Create plots
         self.plot_confusion_matrix(

@@ -13,7 +13,7 @@ from utils.hardware import HardwareManager
 from manage import ProjectManager
 from config.paths import get_checkpoint_dir, get_data_dir, PROJECT_ROOT, CHECKPOINTS_PATH
 from config.base_config import Config
-from utils.visualizer import TrainingVisualizer
+from utils.visualization import TrainingVisualizer
 
 def setup_logging():
     """Setup logging configuration."""
