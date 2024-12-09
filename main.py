@@ -1,3 +1,31 @@
+"""
+Main training script for deepfake detection models.
+
+Usage:
+    python main.py [OPTIONS]
+
+Options:
+    --model MODEL_NAME    Model to train (default: efficientnet)
+                         Available models: efficientnet, resnet, vit, all
+    --drive BOOL         Use Google Drive for backup (default: True)
+    --batch INT          Batch size (default: 32)
+    --epochs INT         Number of training epochs (default: from config.py)
+    --resume             Resume from latest checkpoint
+
+Examples:
+    # Train efficientnet model with default settings
+    python main.py --model efficientnet
+
+    # Train with custom batch size and epochs
+    python main.py --model efficientnet --batch 64 --epochs 20
+
+    # Resume training from latest checkpoint
+    python main.py --model efficientnet --resume
+
+    # Train all available models
+    python main.py --model all
+"""
+
 import argparse
 import os
 from config.paths import *

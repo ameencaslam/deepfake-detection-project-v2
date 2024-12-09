@@ -118,11 +118,11 @@ class ProjectManager:
             with zipfile.ZipFile(backup_file, 'r') as zip_ref:
                 for file in zip_ref.namelist():
                     if file.startswith('dataset/'):
-                        target_path = Path('/content') / file
+                        target_path = Path('/content')
                     else:
-                        target_path = self.project_path / file
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    zip_ref.extract(file, target_path.parent)
+                        target_path = self.project_path
+                    target_path.mkdir(parents=True, exist_ok=True)
+                    zip_ref.extract(file, target_path)
                     logger.info(f"Restored: {file}")
                     
             logger.info("Restore completed")

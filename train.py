@@ -1,3 +1,30 @@
+"""
+Training module for deepfake detection models.
+
+This module can be used directly or through main.py. It provides more detailed
+control over the training process when used directly.
+
+Usage:
+    python train.py [OPTIONS]
+
+Options:
+    --base_path PATH     Base path for project (required)
+    --use_drive BOOL     Use Google Drive for backup (default: True)
+    --epochs INT         Number of training epochs (default: from config.py)
+    --resume             Resume from latest checkpoint
+
+Examples:
+    # Train with default settings
+    python train.py --base_path /path/to/project
+
+    # Train with custom epochs and resume
+    python train.py --base_path /path/to/project --epochs 20 --resume
+
+Note:
+    For most use cases, it's recommended to use main.py instead, which provides
+    a simpler interface and handles model selection.
+"""
+
 import torch
 import os
 import argparse
@@ -91,12 +118,19 @@ def train(config: Config, resume: bool = False):
             checkpoints = list(checkpoint_dir.glob("*.pth"))
             if checkpoints:
                 latest_checkpoint = max(checkpoints, key=lambda x: x.stat().st_mtime)
+                logging.info(f"Loading checkpoint: {latest_checkpoint}")
                 checkpoint = torch.load(latest_checkpoint, map_location=hw_manager.device)
+                
+                # Load model state
                 model.load_state_dict(checkpoint['model_state_dict'])
+                
+                # Load optimizer state
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                
+                # Load training state
                 start_epoch = checkpoint['epoch'] + 1
-                best_val_acc = checkpoint.get('best_val_acc', 0.0)
-                logging.info(f"Resumed from checkpoint: {latest_checkpoint}")
+                best_val_acc = checkpoint['metrics'].get('accuracy', 0.0)
+                logging.info(f"Resuming from epoch {start_epoch} with best validation accuracy: {best_val_acc:.4f}")
         
         # Initialize progress tracker
         progress = ProgressTracker(
