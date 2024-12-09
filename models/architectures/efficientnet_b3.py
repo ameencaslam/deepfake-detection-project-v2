@@ -4,6 +4,7 @@ import timm
 from typing import Dict, Any, Tuple, List, Optional
 from models.base_model import BaseModel
 from utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
+import logging
 
 class EfficientNetModel(BaseModel):
     def __init__(self,
@@ -25,12 +26,17 @@ class EfficientNetModel(BaseModel):
             drop_rate=dropout_rate
         )
         
-        # Load pretrained weights if requested and not resuming from checkpoint
+        # Load pretrained weights if requested
         if pretrained:
-            print("Loading pretrained weights for backbone...")
+            logging.info("Loading pretrained backbone weights...")
             pretrained_model = timm.create_model('efficientnet_b3', pretrained=True)
             # Only load backbone weights, not the classifier
-            self.model.load_state_dict(pretrained_model.state_dict(), strict=False)
+            backbone_state_dict = {k: v for k, v in pretrained_model.state_dict().items() 
+                                 if not k.startswith('classifier')}
+            self.model.load_state_dict(backbone_state_dict, strict=False)
+            logging.info("Pretrained backbone weights loaded")
+        else:
+            logging.info("Initializing model without pretrained weights")
         
         # Get feature dimensions
         with torch.no_grad():

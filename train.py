@@ -70,9 +70,6 @@ def train(config: Config, resume: bool = False):
         hw_manager = HardwareManager()
         hw_manager.print_hardware_info()
         
-        # Initialize training controller
-        controller = TrainingController()
-        
         # Initialize visualizer
         results_path = Path(config.paths['results']) / config.model.architecture
         visualizer = TrainingVisualizer(results_path)
@@ -88,14 +85,26 @@ def train(config: Config, resume: bool = False):
                 checkpoint = torch.load(latest_checkpoint, map_location=hw_manager.device)
                 logging.info(f"Previous best validation accuracy: {checkpoint['metrics'].get('accuracy', 0.0):.4f}")
         
-        # Get model with pretrained weights only if not resuming
-        logging.info(f"Initializing model {'from checkpoint' if resume else 'with pretrained weights' if config.model.pretrained else 'from scratch'}")
-        model = get_model(
-            config.model.architecture,
-            pretrained=not resume and config.model.pretrained,
-            num_classes=config.model.num_classes,
-            dropout_rate=config.model.dropout_rate
-        )
+        # Initialize model
+        if resume:
+            logging.info("Initializing model from checkpoint")
+            model = get_model(
+                config.model.architecture,
+                pretrained=False,  # No pretrained weights when resuming
+                num_classes=config.model.num_classes,
+                dropout_rate=config.model.dropout_rate
+            )
+            # Load checkpoint state
+            model.load_state_dict(checkpoint['model_state_dict'])
+            logging.info("Loaded model state from checkpoint")
+        else:
+            logging.info("Initializing new model with pretrained weights")
+            model = get_model(
+                config.model.architecture,
+                pretrained=config.model.pretrained,
+                num_classes=config.model.num_classes,
+                dropout_rate=config.model.dropout_rate
+            )
         
         # Move model to device
         model = model.to(hw_manager.device)
@@ -106,17 +115,9 @@ def train(config: Config, resume: bool = False):
         start_epoch = 0
         best_val_acc = 0.0
         
-        # Load checkpoint state if resuming
-        if checkpoint is not None:
-            # Load model state
-            model.load_state_dict(checkpoint['model_state_dict'])
-            logging.info("Loaded model state from checkpoint")
-            
-            # Load optimizer state
+        # Load optimizer state if resuming
+        if resume and checkpoint is not None:
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            logging.info("Loaded optimizer state from checkpoint")
-            
-            # Load training state
             start_epoch = checkpoint['epoch'] + 1
             best_val_acc = checkpoint['metrics'].get('accuracy', 0.0)
             logging.info(f"Resuming from epoch {start_epoch} with best validation accuracy: {best_val_acc:.4f}")
@@ -148,18 +149,11 @@ def train(config: Config, resume: bool = False):
         
         # Training loop
         for epoch in range(start_epoch, config.training.num_epochs):
-            if controller.should_stop():
-                logging.info("Training stopped by user")
-                break
-                
             model.train()
             progress_bar = progress.new_epoch(epoch)
             
             # Training phase
-            for batch in dataloaders['train']:
-                if controller.should_stop():
-                    break
-                    
+            for batch_idx, batch in enumerate(dataloaders['train']):
                 images, labels = batch
                 images = images.to(hw_manager.device)
                 labels = labels.to(hw_manager.device)
@@ -179,7 +173,7 @@ def train(config: Config, resume: bool = False):
                 
                 # Update progress
                 progress.update_batch(
-                    batch_idx=progress_bar.n,
+                    batch_idx=batch_idx,
                     loss=loss.item(),
                     accuracy=accuracy.item(),
                     pbar=progress_bar
@@ -236,10 +230,7 @@ def train(config: Config, resume: bool = False):
                 best_path = checkpoint_dir / "checkpoint_best.pth"
                 save_checkpoint(model, best_path, epoch, optimizer, scheduler, val_metrics)
                 if config.use_drive:
-                    project_manager.backup()  # This will include the new best checkpoint
-            
-            # Display stop button after each epoch
-            print("\nClick 'Stop Training' to stop after this epoch, or let it continue...")
+                    project_manager.backup()
         
         # Save final training summary
         visualizer.save_training_summary(val_metrics, config.model.architecture)
