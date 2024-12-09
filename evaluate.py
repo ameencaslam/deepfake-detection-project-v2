@@ -83,7 +83,10 @@ def compute_metrics(predictions, labels, probabilities):
         'precision': precision,
         'recall': recall,
         'f1': f1,
-        'auc_roc': auc_roc
+        'auc_roc': auc_roc,
+        'all_labels': labels,
+        'all_preds': predictions,
+        'all_probs': probabilities
     }
     
     # Add confusion matrix counts
