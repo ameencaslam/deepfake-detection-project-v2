@@ -1,6 +1,6 @@
 from typing import Dict, Any
 import torch.nn as nn
-from .efficientnet import EfficientNetModel
+from .efficientnet_b3 import EfficientNetModel
 from .swin_transformer import SwinTransformerModel
 from .two_stream import TwoStreamModel
 from .xception import XceptionModel
@@ -8,8 +8,8 @@ from .cnn_transformer import CNNTransformerModel
 from .cross_attention import CrossAttentionModel
 
 MODEL_REGISTRY = {
-    'efficientnet_b3': EfficientNetModel,
-    'swin_transformer': SwinTransformerModel,
+    'efficientnet': EfficientNetModel,
+    'swin': SwinTransformerModel,
     'two_stream': TwoStreamModel,
     'xception': XceptionModel,
     'cnn_transformer': CNNTransformerModel,
