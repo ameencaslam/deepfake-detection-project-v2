@@ -9,7 +9,7 @@ from models.model_registry import get_model, MODEL_REGISTRY
 from utils.dataset import DeepfakeDataset
 from utils.hardware import HardwareManager
 from config.paths import get_checkpoint_dir, get_data_dir
-from config.base_config import BaseConfig
+from config.base_config import Config
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Evaluate deepfake detection model')
@@ -26,8 +26,10 @@ def parse_args():
                        help='Path to model checkpoint. If not specified, will use latest from checkpoint directory')
     parser.add_argument('--data_path', type=str, default=default_data,
                        help='Path to test data')
-    parser.add_argument('--batch_size', type=int, default=32,
+    parser.add_argument('--batch_size', type=int, default=Config().training.batch_size,
                        help='Batch size for evaluation')
+    parser.add_argument('--image_size', type=int, default=Config().data.image_size,
+                       help='Input image size')
     
     args = parser.parse_args()
     
@@ -110,8 +112,12 @@ def main():
     hw_manager = HardwareManager()
     hw_manager.print_hardware_info()
     
+    # Create config for model initialization
+    config = Config()
+    config.model.architecture = args.model
+    
     # Load model
-    model = get_model(args.model)
+    model = get_model(args.model, config=config.model.__dict__)
     checkpoint = torch.load(args.checkpoint, map_location=hw_manager.device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model = model.to(hw_manager.device)
@@ -120,13 +126,14 @@ def main():
     print(f"Checkpoint: {args.checkpoint}")
     print(f"Test data: {args.data_path}")
     print(f"Batch size: {args.batch_size}")
+    print(f"Image size: {args.image_size}")
     
     # Get data loader
     test_loader = DeepfakeDataset.get_dataloader(
         data_path=args.data_path,
         batch_size=args.batch_size,
-        num_workers=4,
-        image_size=224,
+        num_workers=config.data.num_workers,
+        image_size=args.image_size,
         train=False
     )
     

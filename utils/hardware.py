@@ -109,16 +109,14 @@ class HardwareManager:
         return info
         
     def print_hardware_info(self):
-        """Print detailed hardware information."""
-        info = self.get_device_info()
-        stats = self.get_hardware_stats()
-        
+        """Print hardware configuration information."""
         print("Hardware Configuration:")
-        print(f"├── Device: {info['device_type'].upper()}")
-        if info['device_type'] == 'cuda':
-            print(f"├── GPU: {info['gpu_name']}")
-            print(f"├── GPU Memory: {info['gpu_memory']}")
-            print(f"├── CUDA Version: {info['cuda_version']}")
-        print(f"├── Mixed Precision: {'Enabled' if info['mixed_precision'] else 'Disabled'}")
-        print(f"├── CPU Usage: {stats.cpu_utilization:.1f}%")
-        print(f"└── RAM Usage: {stats.ram_used:.1f}GB/{stats.ram_total:.1f}GB") 
+        print(f"├── Device: {self.device.type.upper()}")
+        if self.gpu_available:
+            print(f"├── GPU: {self.gpu_name}")
+            print(f"├── GPU Memory: {self.gpu_memory_total:.1f}GB")
+            print(f"├── CUDA Version: {torch.version.cuda}")
+        print(f"├── Mixed Precision: {'Enabled' if self.mixed_precision else 'Disabled'}")
+        print(f"├── CPU Usage: {psutil.cpu_percent()}%")
+        ram = psutil.virtual_memory()
+        print(f"└── RAM Usage: {ram.used/1e9:.1f}GB/{ram.total/1e9:.1f}GB") 
