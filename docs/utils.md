@@ -2,163 +2,214 @@
 
 ## Overview
 
-The utilities package provides essential tools for training, data management, and hardware optimization.
+The project includes various utility modules for training, evaluation, and project management.
 
-## Components
-
-### 1. Hardware Management (`utils/hardware.py`)
+## Hardware Management (`utils/hardware.py`)
 
 ```python
-from utils.hardware import HardwareManager
+from utils.hardware import get_device, get_memory_usage
 
-hw_manager = HardwareManager()
-hw_manager.print_hardware_info()
+# Get appropriate device
+device = get_device()  # Returns 'cuda' if available, else 'cpu'
+
+# Monitor memory
+memory_stats = get_memory_usage()
 ```
 
 Features:
 
-- Automatic device detection
-- Memory optimization
-- Hardware monitoring
-- Mixed precision setup
+- Automatic device selection
+- Memory monitoring
+- GPU optimization
+- Resource tracking
 
-### 2. Progress Tracking (`utils/progress.py`)
-
-```python
-from utils.progress import ProgressTracker
-
-tracker = ProgressTracker(num_epochs=50, num_batches=100)
-```
-
-Features:
-
-- Training progress bars
-- Metric tracking
-- Time estimation
-- Hardware usage display
-
-### 3. Dataset Management (`utils/dataset.py`)
+## Dataset Management (`utils/dataset.py`)
 
 ```python
-from utils.dataset import DeepfakeDataset
+from utils.dataset import get_dataloader
 
-dataset = DeepfakeDataset(
-    data_dir='path/to/data',
-    split='train'
+# Get training dataloader
+train_loader = get_dataloader(
+    data_path='/path/to/data',
+    batch_size=32,
+    train=True
+)
+
+# Get test dataloader
+test_loader = get_dataloader(
+    data_path='/path/to/test',
+    batch_size=32,
+    train=False
 )
 ```
 
 Features:
 
-- Automatic data splitting
-- Data augmentation
-- Balanced sampling
-- Multi-worker loading
+- Data loading
+- Augmentation
+- Preprocessing
+- Batch management
 
-### 4. Training Utilities (`utils/training.py`)
+## Training Utilities (`utils/training.py`)
 
 ```python
-from utils.training import get_optimizer, get_scheduler
+from utils.training import (
+    get_optimizer,
+    get_scheduler,
+    LabelSmoothingLoss
+)
 
-optimizer = get_optimizer(model, optimizer_name='adam')
-scheduler = get_scheduler(optimizer, scheduler_name='onecycle')
+# Setup training components
+optimizer = get_optimizer(model, 'adamw', learning_rate=1e-4)
+scheduler = get_scheduler(optimizer, 'onecycle', num_epochs=50)
+criterion = LabelSmoothingLoss(num_classes=2, smoothing=0.1)
 ```
 
 Features:
 
 - Optimizer configuration
 - Learning rate scheduling
-- Label smoothing
-- Early stopping
+- Loss functions
+- Training helpers
 
-### 5. Backup System (`utils/backup.py`)
+## Progress Tracking (`utils/progress.py`)
 
 ```python
-from utils.backup import ProjectBackup
+from utils.progress import ProgressTracker
 
-backup = ProjectBackup(base_path='/path/to/project')
-backup.create_backup()
+tracker = ProgressTracker(
+    num_epochs=50,
+    steps_per_epoch=100
+)
+
+# Update progress
+tracker.update(loss=0.5, accuracy=0.95)
 ```
 
 Features:
 
-- Automatic project backup
-- Google Drive integration
-- Checkpoint management
-- Project restoration
+- Training progress
+- Metric tracking
+- Time estimation
+- Status display
 
-## Usage Examples
-
-### 1. Hardware Optimization
+## Backup System (`utils/backup.py`)
 
 ```python
-# Memory management
-hw_manager.optimize_memory()
+from utils.backup import create_backup, restore_backup
 
-# Get hardware stats
-stats = hw_manager.get_hardware_stats()
-print(f"GPU Usage: {stats.gpu_utilization}%")
-```
+# Create backup
+create_backup(
+    source_dir='project',
+    backup_dir='backups'
+)
 
-### 2. Progress Tracking
-
-```python
-# Start epoch
-pbar = tracker.new_epoch(epoch)
-
-# Update batch progress
-tracker.update_batch(batch_idx, loss, accuracy, pbar)
-
-# End epoch
-tracker.end_epoch(val_metrics)
-```
-
-### 3. Dataset Creation
-
-```python
-# Create dataloaders
-dataloaders = DeepfakeDataset.create_dataloaders(
-    data_dir='path/to/data',
-    batch_size=32,
-    num_workers=4
+# Restore from backup
+restore_backup(
+    backup_path='backups/latest',
+    restore_dir='project'
 )
 ```
 
-### 4. Training Setup
+Features:
+
+- Project backups
+- State preservation
+- Easy restoration
+- Version control
+
+## Common Functions
+
+### 1. Model Management
+
+```python
+# Get model
+model = get_model('efficientnet')
+
+# Load checkpoint
+load_checkpoint(model, 'path/to/checkpoint.pth')
+
+# Save checkpoint
+save_checkpoint(model, 'save/path.pth')
+```
+
+### 2. Training Helpers
 
 ```python
 # Configure training
-optimizer = get_optimizer(
-    model,
-    optimizer_name='adamw',
-    learning_rate=1e-4
-)
+optimizer = get_optimizer(model)
+scheduler = get_scheduler(optimizer)
+criterion = get_loss_function()
 
-scheduler = get_scheduler(
-    optimizer,
-    scheduler_name='onecycle',
-    num_epochs=50
-)
+# Training step
+loss = training_step(model, batch, criterion)
 ```
 
-### 5. Backup Management
+### 3. Evaluation Helpers
 
 ```python
-# Create backup
-backup.create_backup(include_checkpoints=True)
+# Evaluate model
+metrics = evaluate_model(model, test_loader)
 
-# Restore from backup
-backup.restore_from_backup()
-
-# Clean old backups
-backup.clean_old_backups(keep_last=3)
+# Print metrics
+print_metrics(metrics)
 ```
 
-## Important Notes
+## Best Practices
 
-1. Hardware manager automatically selects best device
-2. Progress tracker provides real-time updates
-3. Dataset handles data splitting automatically
-4. Training utilities support mixed precision
-5. Backup system integrates with Google Drive
-6. All components work together seamlessly
+### 1. Hardware Usage
+
+- Monitor memory usage
+- Use appropriate batch sizes
+- Enable mixed precision
+- Track resource usage
+
+### 2. Data Management
+
+- Verify data paths
+- Check data loading
+- Monitor batch sizes
+- Use proper transforms
+
+### 3. Training Management
+
+- Track progress
+- Save checkpoints
+- Monitor metrics
+- Handle interruptions
+
+## Error Handling
+
+```python
+try:
+    # Training code
+    train_model()
+except RuntimeError as e:
+    handle_training_error(e)
+finally:
+    cleanup_resources()
+```
+
+## Configuration
+
+```python
+# Load config
+config = load_config()
+
+# Update settings
+config.update({
+    'batch_size': 32,
+    'learning_rate': 1e-4
+})
+```
+
+## Logging
+
+```python
+# Setup logging
+logger = setup_logger()
+
+# Log events
+logger.info('Training started')
+logger.error('Error occurred')
+```

@@ -1,147 +1,145 @@
-# Model Architectures Documentation
+# Models Documentation
 
-## Overview
+## Available Models
 
-The project includes multiple state-of-the-art architectures for deepfake detection.
+### 1. Swin Transformer (`swin`)
 
-## Base Model
+- Vision transformer with shifted windows
+- Hierarchical feature learning
+- Multi-head self-attention
 
-All models inherit from `BaseModel` which provides:
+### 2. Two-Stream Network (`two_stream`)
+
+- Spatial and frequency domain analysis
+- Dual-path architecture
+- Feature fusion mechanism
+
+### 3. Xception (`xception`)
+
+- Modified Xception architecture
+- Multi-scale feature extraction
+- Depthwise separable convolutions
+
+### 4. CNN-Transformer Hybrid (`cnn_transformer`)
+
+- Combined CNN and transformer architecture
+- Feature pyramid network
+- Cross-attention mechanism
+
+### 5. Cross-Attention Model (`cross_attention`)
+
+- Multi-head cross-attention
+- Feature interaction learning
+- Hierarchical representation
+
+### 6. EfficientNet-B3 (`efficientnet`)
+
+- Compound scaling for optimal performance
+- Multi-scale feature aggregation
+- Advanced regularization techniques
+
+## Model Usage
+
+### Basic Training
+
+```bash
+python train.py --model MODEL_NAME
+```
+
+### Custom Training
+
+```bash
+python train.py \
+    --model MODEL_NAME \
+    --batch_size 32 \
+    --learning_rate 1e-4 \
+    --num_epochs 50
+```
+
+### Evaluation
+
+```bash
+# Quick evaluation
+python evaluate.py --model MODEL_NAME
+
+# Custom evaluation
+python evaluate.py \
+    --model MODEL_NAME \
+    --checkpoint path/to/checkpoint.pth
+```
+
+## Model-Specific Parameters
+
+### EfficientNet
+
+```bash
+python train.py \
+    --model efficientnet \
+    --dropout_rate 0.3 \
+    --label_smoothing 0.1
+```
+
+### Swin Transformer
+
+```bash
+python train.py \
+    --model swin \
+    --window_size 7 \
+    --num_heads 8
+```
+
+### Two-Stream Network
+
+```bash
+python train.py \
+    --model two_stream \
+    --fusion_type 'concat'
+```
+
+## Model Features
+
+### Common Features
 
 - Mixed precision training
-- Checkpoint management
-- Training/validation steps
-- Optimizer configuration
+- Label smoothing
+- Layer-wise learning rates
+- Automatic checkpoint management
 
-## Available Architectures
+### Advanced Features
 
-### 1. Swin Transformer
+- Multi-scale feature processing
+- Adaptive learning rate scheduling
+- Regularization techniques
+- Confusion matrix evaluation
 
-```python
-from models.architectures import get_model
-model = get_model('swin_transformer')
-```
+## Model Performance
 
-Features:
+Each model provides:
 
-- Hierarchical feature learning
-- Shifted window attention
-- Additional normalization layers
-- Stochastic depth dropout
+- Accuracy metrics
+- Precision and recall
+- F1 score
+- AUC-ROC curve
+- Confusion matrix
 
-### 2. Two-Stream Network
+## Best Practices
 
-```python
-model = get_model('two_stream')
-```
+1. **Training**
 
-Features:
+   - Start with default parameters
+   - Use mixed precision training
+   - Monitor validation metrics
+   - Use appropriate batch size
 
-- Spatial stream (RGB)
-- Frequency stream (FFT)
-- Feature fusion
-- Multi-scale processing
+2. **Evaluation**
 
-### 3. Xception
+   - Use multiple metrics
+   - Check confusion matrix
+   - Validate on different datasets
+   - Compare model variants
 
-```python
-model = get_model('xception')
-```
-
-Features:
-
-- Depthwise separable convolutions
-- Multi-scale feature aggregation
-- Additional normalization
-- Feature pooling strategies
-
-### 4. CNN-Transformer Hybrid
-
-```python
-model = get_model('cnn_transformer')
-```
-
-Features:
-
-- CNN backbone (ResNet50)
-- Transformer blocks
-- Cross-feature attention
-- Positional embeddings
-
-### 5. Cross-Attention Model
-
-```python
-model = get_model('cross_attention')
-```
-
-Features:
-
-- Multi-scale feature extraction
-- Cross-attention mechanism
-- Global context modeling
-- Feature fusion
-
-## Common Features
-
-### Training Optimizations
-
-1. Learning Rate Management:
-
-   - One Cycle Policy
-   - Layer-wise learning rates
-   - Warmup strategy
-
-2. Regularization:
-
-   - Label smoothing
-   - Dropout scheduling
-   - Weight decay
-   - Layer normalization
-
-3. Feature Processing:
-   - Multi-scale features
-   - Feature normalization
-   - Attention mechanisms
-
-### Model Configuration
-
-```python
-model = get_model(
-    architecture='swin_transformer',
-    pretrained=True,
-    num_classes=2,
-    dropout_rate=0.3
-)
-```
-
-## Training Features
-
-1. Mixed Precision:
-
-   ```python
-   with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-       outputs = model(images)
-   ```
-
-2. Checkpointing:
-
-   ```python
-   model.save_checkpoint(
-       path='checkpoint.pth',
-       epoch=epoch,
-       optimizer=optimizer
-   )
-   ```
-
-3. Validation:
-   ```python
-   metrics = model.validation_step(batch)
-   ```
-
-## Important Notes
-
-1. All models support mixed precision training
-2. Checkpoints include full training state
-3. Models can be customized via configuration
-4. Pre-trained weights are available
-5. Hardware-specific optimizations are automatic
+3. **Optimization**
+   - Adjust learning rates
+   - Tune dropout rates
+   - Modify batch sizes
+   - Experiment with schedulers

@@ -1,200 +1,181 @@
-# Training Documentation
+# Training and Evaluation Guide
 
-## Overview
-
-The training system provides a unified pipeline for training different deepfake detection models.
-
-## Training Script (`train.py`)
+## Training
 
 ### Basic Usage
 
-```python
-from config.base_config import Config
-from train import train
+```bash
+# Train a model
+python train.py --model efficientnet --data_path /path/to/data
 
-config = Config(base_path='/path/to/project')
-train(config)
+# Resume training
+python train.py --model efficientnet --resume path/to/checkpoint.pth
+```
+
+### Advanced Options
+
+```bash
+python train.py \
+    --model efficientnet \
+    --data_path /path/to/data \
+    --batch_size 32 \
+    --learning_rate 1e-4 \
+    --num_epochs 50 \
+    --dropout_rate 0.3 \
+    --label_smoothing 0.1 \
+    --weight_decay 0.01
+```
+
+## Evaluation
+
+### Quick Evaluation
+
+```bash
+# Evaluate using latest checkpoint
+python evaluate.py --model efficientnet
+
+# Evaluate specific checkpoint
+python evaluate.py \
+    --model efficientnet \
+    --checkpoint path/to/checkpoint.pth
+```
+
+### Detailed Evaluation
+
+```bash
+python evaluate.py \
+    --model efficientnet \
+    --checkpoint path/to/checkpoint.pth \
+    --data_path /path/to/test/data \
+    --batch_size 32
 ```
 
 ## Training Features
 
-### 1. Training Loop
-
-```python
-for epoch in range(num_epochs):
-    # Training phase
-    model.train()
-    for batch in train_loader:
-        # Forward pass
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-
-        # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-    # Validation phase
-    model.eval()
-    validate(model, val_loader)
-```
-
-### 2. Optimization Features
+### 1. Optimization
 
 - Mixed precision training
-- Gradient clipping
-- Learning rate scheduling
-- Early stopping
-- Model checkpointing
+- Layer-wise learning rates
+- One-cycle learning rate policy
+- Weight decay with AdamW
 
-### 3. Progress Tracking
+### 2. Regularization
 
-- Batch progress
-- Epoch progress
-- Metric monitoring
-- Time estimation
-- Hardware usage
-
-### 4. Validation
-
-- Regular validation
-- Best model saving
-- Metric tracking
-- Early stopping check
-
-## Training Configuration
-
-### 1. Basic Settings
-
-```python
-config = Config(
-    base_path='/path/to/project',
-    use_drive=True
-)
-```
-
-### 2. Training Parameters
-
-```python
-config.training.batch_size = 32
-config.training.num_epochs = 50
-config.training.learning_rate = 1e-4
-```
-
-### 3. Model Settings
-
-```python
-config.model.architecture = 'swin_transformer'
-config.model.pretrained = True
-config.model.dropout_rate = 0.3
-```
-
-## Training Process
-
-### 1. Initialization
-
-```python
-# Setup
-backup_manager = ProjectBackup(config.base_path)
-hw_manager = HardwareManager()
-progress = ProgressTracker(num_epochs, num_batches)
-
-# Model
-model = get_model(config.model.architecture)
-optimizer = model.configure_optimizers()
-```
-
-### 2. Training Loop
-
-```python
-try:
-    for epoch in range(num_epochs):
-        # Training
-        train_epoch(model, train_loader)
-
-        # Validation
-        val_metrics = validate(model, val_loader)
-
-        # Checkpointing
-        save_checkpoint(model, epoch, val_metrics)
-
-except KeyboardInterrupt:
-    print("Training interrupted")
-finally:
-    # Backup
-    backup_manager.create_backup()
-```
+- Label smoothing
+- Dropout
+- Layer normalization
+- Stochastic depth (model specific)
 
 ### 3. Monitoring
 
-- Real-time progress bars
-- Metric plotting
-- Hardware monitoring
-- Time estimation
+- Training loss
+- Validation metrics
+- Learning rate schedule
+- Memory usage
 
-## Important Features
+## Evaluation Metrics
 
-### 1. Automatic Backup
+### 1. Classification Metrics
 
-- Regular checkpointing
-- Drive integration
-- Project state saving
-- Easy restoration
+- Accuracy
+- Precision
+- Recall
+- F1 Score
+- AUC-ROC
 
-### 2. Hardware Optimization
+### 2. Detailed Analysis
 
-- GPU memory management
-- Mixed precision training
-- Automatic device selection
-- Resource monitoring
+- Confusion matrix
+- True/False positives
+- True/False negatives
+- Total samples processed
 
-### 3. Training Control
+## Model-Specific Training
 
-- Early stopping
-- Learning rate adjustment
-- Gradient clipping
-- Memory optimization
+### EfficientNet
+
+```bash
+python train.py \
+    --model efficientnet \
+    --dropout_rate 0.3 \
+    --label_smoothing 0.1
+```
+
+### Swin Transformer
+
+```bash
+python train.py \
+    --model swin \
+    --window_size 7 \
+    --num_heads 8
+```
 
 ## Best Practices
 
-1. **Before Training**:
+### Training
 
-   - Check hardware availability
-   - Verify dataset structure
-   - Configure parameters
-   - Test data loading
+1. Start with default hyperparameters
+2. Monitor validation metrics
+3. Use appropriate batch size
+4. Enable mixed precision training
 
-2. **During Training**:
+### Evaluation
 
-   - Monitor progress
-   - Check metrics
-   - Watch hardware usage
-   - Save checkpoints
+1. Use multiple test sets
+2. Check all metrics
+3. Analyze confusion matrix
+4. Compare with baselines
 
-3. **After Training**:
-   - Evaluate model
-   - Save results
-   - Backup project
-   - Clean old files
+## Common Issues
 
-## Troubleshooting
+### Out of Memory
 
-1. **Memory Issues**:
+- Reduce batch size
+- Enable mixed precision
+- Check input resolution
 
-   - Reduce batch size
-   - Enable mixed precision
-   - Clean memory regularly
-   - Monitor GPU usage
+### Poor Convergence
 
-2. **Training Problems**:
+- Adjust learning rate
+- Modify optimizer settings
+- Check data preprocessing
+- Verify loss computation
 
-   - Check learning rate
-   - Verify data loading
-   - Monitor gradients
-   - Check loss values
+## Getting Help
 
-3. **Backup Issues**:
-   - Verify Drive access
-   - Check space availability
-   - Monitor backup size
-   - Keep essential files
+```bash
+# View training options
+python train.py --help
+
+# View evaluation options
+python evaluate.py --help
+```
+
+## Checkpoints
+
+### Location
+
+- Default: `checkpoints/<model_name>/`
+- Latest used automatically
+- Specific checkpoint via `--checkpoint`
+
+### Contents
+
+- Model state
+- Optimizer state
+- Training epoch
+- Performance metrics
+
+## Data Management
+
+### Training Data
+
+- Set via `--data_path`
+- Default from config
+- Supports multiple formats
+
+### Validation/Test
+
+- Automatic split
+- Custom test set
+- Balanced evaluation

@@ -1,97 +1,115 @@
 # Quickstart Guide
 
-## Setup in Google Colab
+## Installation
 
-1. Clone and install:
+1. Clone the repository
+2. Install dependencies:
 
-```python
-# Clone repository
-!git clone https://github.com/ameencaslam/deepfake-detection-project-v2
-%cd deepfake-detection-project-v2
-
-# Install dependencies
-!pip install -r requirements.txt
-```
-
-2. Run training:
-
-```python
-# Train a specific model
-!python main.py --model swin
-
-# Or train all models
-!python main.py --model all
-
-# Custom batch size
-!python main.py --model xception --batch 64
-
-# Without Drive backup
-!python main.py --model cnn_transformer --drive false
+```bash
+pip install -r requirements.txt
 ```
 
 ## Available Models
 
-- `swin`: Swin Transformer
-- `two_stream`: Two-Stream Network
-- `xception`: Xception
-- `cnn_transformer`: CNN-Transformer Hybrid
-- `cross_attention`: Cross-Attention Model
-- `all`: Train all models sequentially
+- Swin Transformer (`swin`)
+- Two-Stream Network (`two_stream`)
+- Xception (`xception`)
+- CNN-Transformer Hybrid (`cnn_transformer`)
+- Cross-Attention Model (`cross_attention`)
+- EfficientNet-B3 (`efficientnet`)
 
-## Command Line Arguments
+## Training
 
-- `--model`: Model to train (default: 'all')
-- `--drive`: Use Google Drive backup (default: True)
-- `--batch`: Batch size (default: 32)
+Basic training command:
 
-## Quick Tips
-
-### Memory Management
-
-- Start with default batch size (32)
-- Reduce batch size if OOM: `--batch 16`
-- Use GPU runtime in Colab
-
-### Training Speed
-
-- Enable GPU in Colab (Runtime → Change runtime type → GPU)
-- Default settings are optimized for Colab
-
-### Best Practices
-
-- Monitor training progress
-- Use Drive backup when possible
-- Start with one model before training all
-
-## Common Issues
-
-### Out of Memory
-
-```python
-# Reduce batch size
-!python main.py --model swin --batch 16
+```bash
+python train.py --model efficientnet --data_path /path/to/data
 ```
 
-### Drive Issues
+With custom parameters:
 
-```python
-# Run without Drive
-!python main.py --model swin --drive false
+```bash
+python train.py \
+    --model efficientnet \
+    --data_path /path/to/data \
+    --batch_size 32 \
+    --learning_rate 1e-4 \
+    --num_epochs 50 \
+    --dropout_rate 0.3 \
+    --label_smoothing 0.1
 ```
 
-### Dataset Not Found
+## Evaluation
 
-Make sure the dataset is in:
+Simple evaluation (uses latest checkpoint):
 
-```
-/content/3body-filtered-v2-10k/
-├── real/
-└── fake/
+```bash
+python evaluate.py --model efficientnet
 ```
 
-## Next Steps
+Custom evaluation:
 
-1. Monitor training progress in the output
-2. Check saved models in the project directory
-3. Results are saved automatically
-4. Use Drive backup for important checkpoints
+```bash
+python evaluate.py \
+    --model efficientnet \
+    --checkpoint path/to/checkpoint.pth \
+    --data_path path/to/test/data \
+    --batch_size 32
+```
+
+## Getting Help
+
+View available options for any script:
+
+```bash
+# Training options
+python train.py --help
+
+# Evaluation options
+python evaluate.py --help
+
+# Main script options
+python main.py --help
+```
+
+## Project Structure
+
+```
+project/
+├── config/             # Configuration files
+├── models/             # Model architectures
+│   └── architectures/  # Individual model implementations
+├── utils/             # Utility functions
+├── docs/              # Documentation
+├── train.py          # Training script
+├── evaluate.py       # Evaluation script
+└── requirements.txt  # Project dependencies
+```
+
+## Common Operations
+
+### Model Training
+
+```bash
+# Basic training
+python train.py --model efficientnet
+
+# Resume training
+python train.py --model efficientnet --resume path/to/checkpoint.pth
+```
+
+### Model Evaluation
+
+```bash
+# Quick evaluation with latest checkpoint
+python evaluate.py --model efficientnet
+
+# Detailed evaluation with specific checkpoint
+python evaluate.py --model efficientnet --checkpoint path/to/checkpoint.pth
+```
+
+### Configuration
+
+- Model configurations in `config/base_config.py`
+- Data paths in `config/paths.py`
+- Model-specific parameters through command line arguments
