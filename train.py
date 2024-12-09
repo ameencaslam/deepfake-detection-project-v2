@@ -3,7 +3,7 @@ import os
 import argparse
 from utils.dataset import DeepfakeDataset
 from utils.hardware import HardwareManager
-from utils.progress import ProgressTracker, TrainingController
+from utils.progress import ProgressTracker
 from utils.backup import ProjectBackup
 from config.base_config import Config
 from models.architectures import get_model
