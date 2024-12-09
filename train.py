@@ -77,16 +77,41 @@ def train(config: Config, resume: bool = False):
         results_path = Path(config.paths['results']) / config.model.architecture
         visualizer = TrainingVisualizer(results_path)
         
-        # Get model
+        # Check for checkpoint if resuming
+        checkpoint = None
+        if resume:
+            checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
+            checkpoints = list(checkpoint_dir.glob("*.pth"))
+            if checkpoints:
+                latest_checkpoint = max(checkpoints, key=lambda x: x.stat().st_mtime)
+                logging.info(f"Loading checkpoint: {latest_checkpoint}")
+                checkpoint = torch.load(latest_checkpoint, map_location=hw_manager.device)
+                logging.info(f"Previous best validation accuracy: {checkpoint['metrics'].get('accuracy', 0.0):.4f}")
+        
+        # Get model with pretrained weights only if not resuming
         model = get_model(
             config.model.architecture,
-            pretrained=config.model.pretrained,
+            pretrained=not resume and config.model.pretrained,
             num_classes=config.model.num_classes,
             dropout_rate=config.model.dropout_rate
         )
         
         # Move model to device
         model = model.to(hw_manager.device)
+        
+        # Setup training components
+        optimizer = model.configure_optimizers()[0]
+        scheduler = None
+        start_epoch = 0
+        best_val_acc = 0.0
+        
+        # Load checkpoint state if resuming
+        if checkpoint is not None:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            best_val_acc = checkpoint['metrics'].get('accuracy', 0.0)
+            logging.info(f"Resuming from epoch {start_epoch} with best validation accuracy: {best_val_acc:.4f}")
         
         # Get dataloaders
         dataloaders = {
@@ -105,32 +130,6 @@ def train(config: Config, resume: bool = False):
                 train=False
             )
         }
-        
-        # Setup training components
-        optimizer = model.configure_optimizers()[0]
-        scheduler = None
-        start_epoch = 0
-        best_val_acc = 0.0
-        
-        # Resume from checkpoint if requested
-        if resume:
-            checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
-            checkpoints = list(checkpoint_dir.glob("*.pth"))
-            if checkpoints:
-                latest_checkpoint = max(checkpoints, key=lambda x: x.stat().st_mtime)
-                logging.info(f"Loading checkpoint: {latest_checkpoint}")
-                checkpoint = torch.load(latest_checkpoint, map_location=hw_manager.device)
-                
-                # Load model state
-                model.load_state_dict(checkpoint['model_state_dict'])
-                
-                # Load optimizer state
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                
-                # Load training state
-                start_epoch = checkpoint['epoch'] + 1
-                best_val_acc = checkpoint['metrics'].get('accuracy', 0.0)
-                logging.info(f"Resuming from epoch {start_epoch} with best validation accuracy: {best_val_acc:.4f}")
         
         # Initialize progress tracker
         progress = ProgressTracker(
