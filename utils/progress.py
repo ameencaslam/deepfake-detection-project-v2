@@ -56,17 +56,15 @@ class ProgressTracker:
         
     def update_batch(self, batch_idx: int, loss: float, accuracy: float, pbar):
         """Update metrics for current batch."""
-        self.running_loss += loss
-        self.running_acc += accuracy
+        # Update running averages
+        self.running_loss = (self.running_loss * self.count + loss) / (self.count + 1)
+        self.running_acc = (self.running_acc * self.count + accuracy) / (self.count + 1)
         self.count += 1
         
         # Update progress bar
-        avg_loss = self.running_loss / self.count
-        avg_acc = self.running_acc / self.count
-        
         pbar.set_postfix({
-            'loss': f"{avg_loss:.4f}",
-            'acc': f"{avg_acc:.2%}"
+            'loss': f"{self.running_loss:.4f}",
+            'acc': f"{self.running_acc:.2%}"
         })
         pbar.update(1)
         

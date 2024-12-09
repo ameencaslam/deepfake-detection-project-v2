@@ -10,6 +10,9 @@ from models.architectures import get_model
 from typing import Dict, Any
 import json
 from datetime import datetime
+import logging
+import numpy as np
+from utils.visualization import TrainingVisualizer
 
 def save_checkpoint(model, checkpoint_path, epoch, optimizer, scheduler, metrics):
     """Save model checkpoint."""
@@ -64,6 +67,16 @@ def train(config: Config):
             hardware_manager=hw_manager
         )
         
+        # Initialize visualizer
+        visualizer = TrainingVisualizer(config.paths['results'] / config.model.architecture)
+        
+        # Plot expected learning rate schedule
+        visualizer.plot_learning_rate_schedule(
+            optimizer,
+            config.training.num_epochs,
+            len(dataloaders['train'])
+        )
+        
         # Training loop
         best_val_acc = 0.0
         for epoch in range(config.training.num_epochs):
@@ -99,6 +112,10 @@ def train(config: Config):
                     metrics['loss'].backward()
                     optimizer.step()
                 
+                # Step LR scheduler if it's OneCycleLR
+                if scheduler is not None and not isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    scheduler.step()
+                
                 # Update progress
                 progress.update_batch(
                     batch_idx,
@@ -114,7 +131,10 @@ def train(config: Config):
             val_metrics = {
                 'loss': 0.0,
                 'accuracy': 0.0,
-                'num_samples': 0
+                'num_samples': 0,
+                'all_preds': [],
+                'all_labels': [],
+                'all_probs': []
             }
             
             with torch.no_grad():
@@ -122,44 +142,66 @@ def train(config: Config):
                     images = images.to(hw_manager.device)
                     labels = labels.to(hw_manager.device)
                     batch_metrics = model.validation_step((images, labels))
+                    
+                    # Accumulate metrics
                     val_metrics['loss'] += batch_metrics['loss'].item() * images.size(0)
                     val_metrics['accuracy'] += batch_metrics['accuracy'].item() * images.size(0)
                     val_metrics['num_samples'] += images.size(0)
+                    
+                    # Store predictions and labels for plotting
+                    val_metrics['all_preds'].extend(batch_metrics['predictions'].cpu().numpy())
+                    val_metrics['all_labels'].extend(labels.cpu().numpy())
+                    probs = torch.softmax(model(images), dim=1)
+                    val_metrics['all_probs'].extend(probs[:, 1].cpu().numpy())
                     
             # Calculate average validation metrics
             val_metrics['loss'] /= val_metrics['num_samples']
             val_metrics['accuracy'] /= val_metrics['num_samples']
             
-            # Update learning rate
-            if scheduler is not None:
-                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    scheduler.step(val_metrics['loss'])
-                else:
-                    scheduler.step()
-                
+            # Update ReduceLROnPlateau scheduler if used
+            if scheduler is not None and isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                scheduler.step(val_metrics['loss'])
+            
+            # Update visualizer
+            current_lr = optimizer.param_groups[0]['lr']
+            visualizer.update_history(
+                {
+                    'train_loss': progress.running_loss,
+                    'train_acc': progress.running_acc,
+                    'val_loss': val_metrics['loss'],
+                    'val_acc': val_metrics['accuracy']
+                },
+                current_lr
+            )
+            
+            # Plot training history
+            visualizer.plot_training_history()
+            
+            # Plot validation metrics every few epochs
+            if (epoch + 1) % 5 == 0:
+                visualizer.plot_confusion_matrix(
+                    np.array(val_metrics['all_labels']),
+                    np.array(val_metrics['all_preds'])
+                )
+                visualizer.plot_roc_curve(
+                    np.array(val_metrics['all_labels']),
+                    np.array(val_metrics['all_probs'])
+                )
+                visualizer.plot_prediction_distribution(
+                    np.array(val_metrics['all_probs']),
+                    np.array(val_metrics['all_labels'])
+                )
+            
             # End epoch and display metrics
             progress.end_epoch(val_metrics)
             
-            # Display stop button after each epoch
-            print("\nClick 'Stop Training' to stop after this epoch, or let it continue...")
-            
-            # Save checkpoint
-            checkpoint_dir = os.path.join(
-                config.paths['checkpoints'],
-                config.model.architecture
-            )
-            os.makedirs(checkpoint_dir, exist_ok=True)
-            
-            # Save latest checkpoint
-            latest_path = os.path.join(
-                checkpoint_dir,
-                f"checkpoint_latest.pth"
-            )
-            save_checkpoint(model, latest_path, epoch, optimizer, scheduler, val_metrics)
-            
-            # Save best checkpoint if needed
+            # Save checkpoint if best model
             if val_metrics['accuracy'] > best_val_acc:
                 best_val_acc = val_metrics['accuracy']
+                checkpoint_dir = os.path.join(
+                    config.paths['checkpoints'],
+                    config.model.architecture
+                )
                 best_path = os.path.join(
                     checkpoint_dir,
                     f"checkpoint_best.pth"
@@ -170,13 +212,15 @@ def train(config: Config):
                     'checkpoints',
                     model_name=config.model.architecture
                 )
-                
-            # Memory optimization
-            if hasattr(hw_manager, 'optimize_memory'):
-                hw_manager.optimize_memory()
             
+            # Display stop button after each epoch
+            print("\nClick 'Stop Training' to stop after this epoch, or let it continue...")
+        
+        # Save final training summary
+        visualizer.save_training_summary(val_metrics, config.model.architecture)
+        
     except Exception as e:
-        print(f"Error during training: {str(e)}")
+        logging.error(f"Error during training: {str(e)}")
         raise
         
     finally:

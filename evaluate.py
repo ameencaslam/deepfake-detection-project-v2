@@ -12,6 +12,7 @@ from utils.hardware import HardwareManager
 from utils.backup import ProjectBackup
 from config.paths import get_checkpoint_dir, get_data_dir, PROJECT_ROOT
 from config.base_config import Config
+from utils.visualizer import TrainingVisualizer
 
 def setup_logging():
     """Setup logging configuration."""
@@ -110,6 +111,9 @@ def main():
     # Initialize backup system first (this will restore from latest backup if available)
     backup_manager = ProjectBackup(PROJECT_ROOT, use_drive=args.drive)
     
+    # Initialize visualizer
+    visualizer = TrainingVisualizer(Path(PROJECT_ROOT) / 'results' / args.model / 'evaluation')
+    
     # Now check for checkpoints (after potential restore)
     checkpoint_dir = Path(get_checkpoint_dir()) / args.model
     if not checkpoint_dir.exists():
@@ -165,6 +169,14 @@ def main():
     predictions, labels, probabilities = evaluate(model, test_loader, hw_manager.device)
     metrics = compute_metrics(predictions, labels, probabilities)
     
+    # Plot evaluation results
+    visualizer.plot_confusion_matrix(labels, predictions)
+    visualizer.plot_roc_curve(labels, probabilities)
+    visualizer.plot_prediction_distribution(probabilities, labels)
+    
+    # Save evaluation summary
+    visualizer.save_training_summary(metrics, args.model)
+    
     # Print detailed results
     print("\nEvaluation Results:")
     print(f"Total Samples: {metrics['total_samples']}")
@@ -180,6 +192,8 @@ def main():
     print(f"True Negatives: {metrics['true_negatives']}")
     print(f"False Positives: {metrics['false_positives']}")
     print(f"False Negatives: {metrics['false_negatives']}")
+    
+    print(f"\nPlots saved in: {visualizer.save_dir}")
 
 if __name__ == '__main__':
     try:
