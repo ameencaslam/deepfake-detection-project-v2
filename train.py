@@ -140,6 +140,10 @@ def train(config: Config, resume: bool = False):
             best_val_loss = checkpoint['metrics'].get('loss', float('inf'))
             logging.info(f"Resuming from epoch {start_epoch} with best validation loss: {best_val_loss:.4f}")
             
+            # Reset start_epoch to 0 to respect user-specified epochs
+            start_epoch = 0
+            logging.info(f"Starting fresh count of {config.training.num_epochs} epochs as requested")
+            
         else:
             if resume:
                 logging.warning(f"Resume requested but no checkpoint found at {local_checkpoint_path}")
