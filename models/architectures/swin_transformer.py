@@ -28,25 +28,25 @@ class SwinTransformerModel(BaseModel):
         
         # Get feature dimensions
         with torch.no_grad():
-            # Pass a dummy input to get feature dimensions
             dummy_input = torch.zeros(1, 3, 224, 224)
             features = self.model.forward_features(dummy_input)
             self.feature_dim = features.shape[-1]  # Get feature dimension
         
         # Feature processing
-        self.feature_norm = nn.LayerNorm(512)
-        self.feature_dropout = nn.Dropout(dropout_rate)
-        
-        # Multi-scale feature aggregation
-        self.global_pool = nn.AdaptiveAvgPool1d(1)
-        self.max_pool = nn.AdaptiveMaxPool1d(1)
-        
-        # Additional feature processing
         self.feature_reduction = nn.Sequential(
-            nn.Linear(self.feature_dim * 2, 512),
+            nn.Linear(self.feature_dim * 2, 512),  # *2 for concatenated pooling features
+            nn.LayerNorm(512),
             nn.GELU(),
             nn.Dropout(dropout_rate * 0.5)
         )
+        
+        # Feature normalization
+        self.feature_norm = nn.LayerNorm(512)
+        self.feature_dropout = nn.Dropout(dropout_rate)
+        
+        # Multi-scale pooling
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
         
         # Classifier
         self.classifier = nn.Sequential(
@@ -74,7 +74,7 @@ class SwinTransformerModel(BaseModel):
         }
         
     def _initialize_weights(self):
-        """Initialize added layers."""
+        """Initialize the weights of added layers."""
         for m in [self.feature_reduction, self.classifier]:
             if isinstance(m, nn.Linear):
                 nn.init.trunc_normal_(m.weight, std=0.02)
@@ -86,10 +86,14 @@ class SwinTransformerModel(BaseModel):
         # Get features from Swin Transformer
         features = self.model.forward_features(x)  # [B, N, C]
         
-        # Multi-scale pooling (treating sequence dimension as channels)
-        features = features.transpose(1, 2)  # [B, C, N]
-        avg_features = self.global_pool(features).squeeze(-1)  # [B, C]
-        max_features = self.max_pool(features).squeeze(-1)  # [B, C]
+        # Reshape features for 2D pooling
+        B, N, C = features.shape
+        H = W = int(N ** 0.5)  # Features are from a square grid
+        features = features.transpose(1, 2).reshape(B, C, H, W)
+        
+        # Multi-scale pooling
+        avg_features = self.global_pool(features).flatten(1)
+        max_features = self.max_pool(features).flatten(1)
         
         # Combine features
         combined = torch.cat([avg_features, max_features], dim=1)
@@ -115,15 +119,10 @@ class SwinTransformerModel(BaseModel):
             {'params': new_params, 'lr': 3e-4}          # Higher LR for new layers
         ]
         
-        # Get optimizer with proper weight decay
-        optimizer = get_optimizer(
-            self,
-            optimizer_name='adamw',  # Better for transformers
-            learning_rate=1e-4,
-            weight_decay=0.05  # Higher weight decay for transformers
-        )
+        # Use AdamW with weight decay
+        optimizer = torch.optim.AdamW(param_groups, weight_decay=0.05)  # Higher weight decay for transformers
         
-        # Get scheduler
+        # OneCycle scheduler
         scheduler = get_scheduler(
             optimizer,
             scheduler_name='onecycle',

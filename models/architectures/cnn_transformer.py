@@ -60,6 +60,10 @@ class CNNTransformerModel(BaseModel):
         self.bn = nn.BatchNorm2d(512)
         self.relu = nn.ReLU(inplace=True)
         
+        # Multi-scale pooling
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        
         # Transformer blocks
         transformer_dim = 512
         self.pos_embed = nn.Parameter(torch.zeros(1, 196, transformer_dim))  # 14x14 feature map
@@ -70,7 +74,7 @@ class CNNTransformerModel(BaseModel):
         
         # Feature reduction
         self.feature_reduction = nn.Sequential(
-            nn.Linear(transformer_dim, 512),
+            nn.Linear(transformer_dim * 2, 512),  # *2 for concatenated pooling features
             nn.LayerNorm(512),
             nn.GELU(),
             nn.Dropout(dropout_rate * 0.5)
@@ -125,26 +129,29 @@ class CNNTransformerModel(BaseModel):
         features = self.cnn(x)[-1]  # Get last layer features
         
         # Process features
-        features = self.conv1x1(features)
+        features = self.conv1x1(features)  # [B, C, H, W]
         features = self.bn(features)
         features = self.relu(features)
         
-        # Reshape for transformer
-        B, C, H, W = features.shape
-        features = features.flatten(2).transpose(1, 2)  # B, HW, C
+        # Multi-scale pooling branch
+        avg_pool = self.global_pool(features).flatten(1)  # [B, C]
+        max_pool = self.max_pool(features).flatten(1)     # [B, C]
+        pooled = torch.cat([avg_pool, max_pool], dim=1)   # [B, 2C]
         
-        # Add positional embeddings
-        features = features + self.pos_embed
+        # Transformer branch
+        B, C, H, W = features.shape
+        trans_features = features.flatten(2).transpose(1, 2)  # [B, HW, C]
+        trans_features = trans_features + self.pos_embed
         
         # Apply transformer blocks
         for block in self.transformer_blocks:
-            features = block(features)
+            trans_features = block(trans_features)
             
-        # Global average pooling
-        features = features.mean(dim=1)
+        # Global average pooling of transformer features
+        trans_features = trans_features.mean(dim=1)  # [B, C]
         
         # Feature processing
-        features = self.feature_reduction(features)
+        features = self.feature_reduction(pooled)  # Use pooled features
         features = self.feature_norm(features)
         features = self.feature_dropout(features)
         

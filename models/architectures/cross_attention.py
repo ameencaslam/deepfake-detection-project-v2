@@ -74,6 +74,10 @@ class CrossAttentionModel(BaseModel):
             ) for dim in self.feature_dims
         ])
         
+        # Multi-scale pooling
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        
         # Cross attention blocks
         self.cross_attention = nn.ModuleList([
             CrossAttentionBlock(hidden_dim, dropout=dropout_rate)
@@ -81,8 +85,7 @@ class CrossAttentionModel(BaseModel):
         ])
         
         # Global context
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.context_proj = nn.Linear(self.total_feature_dim, hidden_dim)
+        self.context_proj = nn.Linear(self.total_feature_dim * 2, hidden_dim)  # *2 for avg and max pooling
         
         # Feature reduction
         self.feature_reduction = nn.Sequential(
@@ -138,15 +141,19 @@ class CrossAttentionModel(BaseModel):
         # Project features to common dimension
         projected = [proj(feat) for proj, feat in zip(self.projections, features)]
         
-        # Create global context
-        global_feats = [self.global_pool(feat).flatten(1) for feat in features]
+        # Create global context with multi-scale pooling
+        global_feats = []
+        for feat in features:
+            avg_feat = self.global_pool(feat).flatten(1)
+            max_feat = self.max_pool(feat).flatten(1)
+            global_feats.extend([avg_feat, max_feat])
         global_context = self.context_proj(torch.cat(global_feats, dim=1))
         
         # Process features with cross attention
         processed = []
         for feat in projected:
             # Reshape to sequence
-            H, W = feat.shape[-2:]
+            B, C, H, W = feat.shape
             feat = feat.flatten(2).transpose(1, 2)  # B, HW, C
             
             # Apply cross attention with global context

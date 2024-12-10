@@ -68,12 +68,15 @@ class TwoStreamModel(BaseModel):
         
         # Frequency stream
         self.frequency_stream = FrequencyBranch(in_channels=3)
-        self.freq_pool = nn.AdaptiveAvgPool2d(1)
+        
+        # Multi-scale pooling
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
         
         # Feature processing
         total_features = self.spatial_dim + 256  # spatial + frequency features
         self.feature_reduction = nn.Sequential(
-            nn.Linear(total_features, 512),
+            nn.Linear(total_features * 2, 512),  # *2 for concatenated pooling features
             nn.LayerNorm(512),
             nn.GELU(),
             nn.Dropout(dropout_rate * 0.5)
@@ -119,14 +122,20 @@ class TwoStreamModel(BaseModel):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass combining spatial and frequency streams."""
         # Spatial stream
-        spatial_features = self.spatial_stream.forward_features(x)
+        spatial_features = self.spatial_stream.forward_features(x)  # [B, C]
         
         # Frequency stream
-        freq_features = self.frequency_stream(x)
-        freq_features = self.freq_pool(freq_features).flatten(1)
+        freq_features = self.frequency_stream(x)  # [B, C, H, W]
+        
+        # Multi-scale pooling for both streams
+        spatial_avg = self.global_pool(spatial_features.unsqueeze(-1).unsqueeze(-1)).flatten(1)
+        spatial_max = self.max_pool(spatial_features.unsqueeze(-1).unsqueeze(-1)).flatten(1)
+        
+        freq_avg = self.global_pool(freq_features).flatten(1)
+        freq_max = self.max_pool(freq_features).flatten(1)
         
         # Combine features
-        combined = torch.cat([spatial_features, freq_features], dim=1)
+        combined = torch.cat([spatial_avg, spatial_max, freq_avg, freq_max], dim=1)
         
         # Feature processing
         features = self.feature_reduction(combined)
