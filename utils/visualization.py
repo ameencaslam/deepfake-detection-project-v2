@@ -2,16 +2,19 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 from pathlib import Path
-from sklearn.metrics import confusion_matrix, roc_curve, auc
 import json
-import os
+import logging
+from sklearn.metrics import confusion_matrix, roc_curve, auc
+from typing import Dict, Any
 
 class TrainingVisualizer:
-    def __init__(self, save_dir: Path):
+    """Class for creating and saving training visualizations."""
+    
+    def __init__(self, save_dir: str):
         """Initialize visualizer.
         
         Args:
-            save_dir: Directory to save plots and results
+            save_dir: Directory to save visualizations
         """
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -22,65 +25,107 @@ class TrainingVisualizer:
             'train_acc': [],
             'val_loss': [],
             'val_acc': [],
-            'learning_rates': []
+            'epochs': []
         }
         
-    def _convert_to_serializable(self, obj):
-        """Convert numpy types to Python native types."""
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, dict):
-            return {key: self._convert_to_serializable(value) for key, value in obj.items()}
-        elif isinstance(obj, list):
-            return [self._convert_to_serializable(item) for item in obj]
-        return obj
+        # Load existing history if available
+        history_file = self.save_dir / 'training_history.json'
+        if history_file.exists():
+            try:
+                with open(history_file, 'r') as f:
+                    self.history = json.load(f)
+                logging.info(f"Loaded existing training history from {history_file}")
+            except Exception as e:
+                logging.warning(f"Could not load training history: {str(e)}")
+    
+    def update_training_plots(self, epoch: int, train_metrics: Dict[str, float], val_metrics: Dict[str, float]):
+        """Update training plots with new metrics.
         
-    def save_training_summary(self, metrics: dict, model_name: str):
-        """Save training summary and plots."""
-        # Convert metrics to serializable format
-        serializable_metrics = self._convert_to_serializable(metrics)
+        Args:
+            epoch: Current epoch number
+            train_metrics: Training metrics dictionary
+            val_metrics: Validation metrics dictionary
+        """
+        # Update history
+        self.history['epochs'].append(epoch)
+        self.history['train_loss'].append(float(train_metrics['loss']))
+        self.history['train_acc'].append(float(train_metrics['accuracy']))
+        self.history['val_loss'].append(float(val_metrics['loss']))
+        self.history['val_acc'].append(float(val_metrics['accuracy']))
         
-        # Save metrics
-        metrics_file = self.save_dir / 'metrics.json'
-        with open(metrics_file, 'w') as f:
-            json.dump(serializable_metrics, f, indent=4)
-            
+        # Save updated history
+        with open(self.save_dir / 'training_history.json', 'w') as f:
+            json.dump(self.history, f, indent=4)
+        
         # Create plots
-        self.plot_confusion_matrix(
-            np.array(metrics['all_labels']),
-            np.array(metrics['all_preds'])
-        )
-        self.plot_roc_curve(
-            np.array(metrics['all_labels']),
-            np.array(metrics['all_probs'])
-        )
-        self.plot_prediction_distribution(
-            np.array(metrics['all_probs']),
-            np.array(metrics['all_labels'])
-        )
+        self._plot_metrics()
         
-    def plot_confusion_matrix(self, y_true, y_pred):
-        """Plot confusion matrix."""
-        plt.figure(figsize=(8, 6))
+    def _plot_metrics(self):
+        """Create and save training metric plots."""
+        # Set style
+        plt.style.use('seaborn')
+        
+        # Create figure with two subplots
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+        
+        # Plot loss
+        ax1.plot(self.history['epochs'], self.history['train_loss'], label='Train Loss')
+        ax1.plot(self.history['epochs'], self.history['val_loss'], label='Val Loss')
+        ax1.set_title('Training and Validation Loss')
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('Loss')
+        ax1.legend()
+        ax1.grid(True)
+        
+        # Plot accuracy
+        ax2.plot(self.history['epochs'], self.history['train_acc'], label='Train Acc')
+        ax2.plot(self.history['epochs'], self.history['val_acc'], label='Val Acc')
+        ax2.set_title('Training and Validation Accuracy')
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('Accuracy')
+        ax2.legend()
+        ax2.grid(True)
+        
+        # Adjust layout and save
+        plt.tight_layout()
+        plt.savefig(self.save_dir / 'training_metrics.png')
+        plt.close()
+        
+    def save_confusion_matrix(self, y_true: np.ndarray, y_pred: np.ndarray):
+        """Save confusion matrix plot.
+        
+        Args:
+            y_true: True labels
+            y_pred: Predicted labels
+        """
+        # Create confusion matrix
         cm = confusion_matrix(y_true, y_pred)
+        
+        # Plot
+        plt.figure(figsize=(8, 6))
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
         plt.title('Confusion Matrix')
         plt.ylabel('True Label')
         plt.xlabel('Predicted Label')
+        
+        # Save
         plt.savefig(self.save_dir / 'confusion_matrix.png')
         plt.close()
         
-    def plot_roc_curve(self, y_true, y_score):
-        """Plot ROC curve."""
-        plt.figure(figsize=(8, 6))
-        fpr, tpr, _ = roc_curve(y_true, y_score)
+    def save_roc_curve(self, y_true: np.ndarray, y_scores: np.ndarray):
+        """Save ROC curve plot.
+        
+        Args:
+            y_true: True labels
+            y_scores: Predicted probabilities
+        """
+        # Calculate ROC curve
+        fpr, tpr, _ = roc_curve(y_true, y_scores)
         roc_auc = auc(fpr, tpr)
         
-        plt.plot(fpr, tpr, color='darkorange', lw=2,
+        # Plot
+        plt.figure(figsize=(8, 6))
+        plt.plot(fpr, tpr, color='darkorange', lw=2, 
                 label=f'ROC curve (AUC = {roc_auc:.2f})')
         plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
         plt.xlim([0.0, 1.0])
@@ -89,23 +134,7 @@ class TrainingVisualizer:
         plt.ylabel('True Positive Rate')
         plt.title('Receiver Operating Characteristic')
         plt.legend(loc="lower right")
+        
+        # Save
         plt.savefig(self.save_dir / 'roc_curve.png')
-        plt.close()
-        
-    def plot_prediction_distribution(self, probabilities, labels):
-        """Plot distribution of prediction probabilities."""
-        plt.figure(figsize=(10, 6))
-        
-        # Plot distributions for each class
-        for i, label in enumerate(['Real', 'Fake']):
-            mask = labels == i
-            if np.any(mask):
-                sns.kdeplot(probabilities[mask], label=f'{label} Images',
-                          fill=True, alpha=0.5)
-        
-        plt.xlabel('Prediction Probability (Fake)')
-        plt.ylabel('Density')
-        plt.title('Distribution of Prediction Probabilities')
-        plt.legend()
-        plt.savefig(self.save_dir / 'prediction_distribution.png')
         plt.close() 

@@ -96,7 +96,8 @@ def train(config: Config, resume: bool = False):
         checkpoint_path = checkpoint_dir / 'checkpoint_best.pth'
         
         # Initialize visualizer
-        visualizer = TrainingVisualizer(Path(config.paths['results']) / config.model.architecture)
+        results_dir = Path(config.paths['results']) / config.model.architecture
+        visualizer = TrainingVisualizer(results_dir)
         
         # Create model
         model = get_model(
@@ -160,7 +161,7 @@ def train(config: Config, resume: bool = False):
             if controller.should_stop():
                 logging.info("Training stopped by user")
                 break
-            
+                
             # Training phase
             model.train()
             train_metrics = {}
@@ -213,7 +214,7 @@ def train(config: Config, resume: bool = False):
             is_best = val_metrics['loss'] < best_val_loss
             if is_best:
                 best_val_loss = val_metrics['loss']
-            
+                
             # Save checkpoint if validation loss improved
             if is_best:
                 save_checkpoint(
