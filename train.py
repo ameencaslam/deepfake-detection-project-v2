@@ -44,28 +44,46 @@ from utils.visualization import TrainingVisualizer
 import glob
 from typing import Optional
 
-def save_checkpoint(model, checkpoint_path, epoch, optimizer, scheduler, metrics):
-    """Save model checkpoint."""
-    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+def save_checkpoint(model, checkpoint_dir, epoch, optimizer, scheduler, metrics, is_best=False):
+    """Save model checkpoint.
     
+    Args:
+        model: Model to save
+        checkpoint_dir: Directory to save checkpoint
+        epoch: Current epoch
+        optimizer: Optimizer state
+        scheduler: Scheduler state
+        metrics: Training metrics
+        is_best: Whether this is the best model so far
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create checkpoint
     checkpoint = {
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'metrics': metrics
     }
-    
     if scheduler is not None:
         checkpoint['scheduler_state_dict'] = scheduler.state_dict()
+    
+    # Save best checkpoint
+    if is_best:
+        best_path = checkpoint_dir / "checkpoint_best.pth"
+        torch.save(checkpoint, best_path)
+        logging.info(f"Saved best checkpoint with accuracy: {metrics['accuracy']:.4f}")
         
-    torch.save(checkpoint, checkpoint_path)
+        # Remove any other checkpoints
+        for ckpt in checkpoint_dir.glob("checkpoint_*.pth"):
+            if ckpt != best_path:
+                ckpt.unlink()
+                logging.info(f"Removed old checkpoint: {ckpt}")
 
 def train(config: Config, resume: bool = False):
     """Train a model with the given configuration."""
     try:
-        # Initialize project manager
-        project_manager = ProjectManager(project_path=config.base_path, use_drive=config.use_drive)
-        
         # Initialize hardware
         hw_manager = HardwareManager()
         hw_manager.print_hardware_info()
@@ -74,25 +92,22 @@ def train(config: Config, resume: bool = False):
         results_path = Path(config.paths['results']) / config.model.architecture
         visualizer = TrainingVisualizer(results_path)
         
-        # Check for checkpoint
-        checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
-        checkpoint_path = checkpoint_dir / "checkpoint_best.pth"
+        # Check for local checkpoint
+        local_checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
+        local_checkpoint_path = local_checkpoint_dir / "checkpoint_best.pth"
         
         # Debug checkpoint paths
         logging.info(f"Resume flag: {resume}")
-        logging.info(f"Project root: {config.base_path}")
-        logging.info(f"Checkpoints dir: {config.paths['checkpoints']}")
-        logging.info(f"Full checkpoint dir: {checkpoint_dir}")
-        logging.info(f"Checking for checkpoint at: {checkpoint_path}")
-        logging.info(f"Checkpoint dir exists: {checkpoint_dir.exists()}")
-        if checkpoint_dir.exists():
-            logging.info(f"Checkpoint dir contents: {list(checkpoint_dir.glob('*'))}")
-        logging.info(f"Checkpoint exists: {checkpoint_path.exists()}")
+        logging.info(f"Looking for checkpoint in local directory only")
+        logging.info(f"Local checkpoint path: {local_checkpoint_path}")
+        logging.info(f"Local checkpoint exists: {local_checkpoint_path.exists()}")
+        if local_checkpoint_dir.exists():
+            logging.info(f"Local checkpoint dir contents: {list(local_checkpoint_dir.glob('*'))}")
         
-        if resume and checkpoint_path.exists():
+        if resume and local_checkpoint_path.exists():
             # Load checkpoint
-            logging.info(f"Loading checkpoint from: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path, map_location=hw_manager.device)
+            logging.info(f"Loading local checkpoint from: {local_checkpoint_path}")
+            checkpoint = torch.load(local_checkpoint_path, map_location=hw_manager.device)
             logging.info(f"Checkpoint contents: {list(checkpoint.keys())}")
             logging.info(f"Previous metrics: {checkpoint['metrics']}")
             
@@ -127,7 +142,7 @@ def train(config: Config, resume: bool = False):
             
         else:
             if resume:
-                logging.warning(f"Resume requested but no checkpoint found at {checkpoint_path}")
+                logging.warning(f"Resume requested but no checkpoint found at {local_checkpoint_path}")
             
             # Create new model with pretrained weights
             logging.info("Creating new model with pretrained weights")
@@ -255,11 +270,15 @@ def train(config: Config, resume: bool = False):
             if val_metrics['accuracy'] > best_val_acc:
                 best_val_acc = val_metrics['accuracy']
                 checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
-                checkpoint_dir.mkdir(parents=True, exist_ok=True)
-                best_path = checkpoint_dir / "checkpoint_best.pth"
-                save_checkpoint(model, best_path, epoch, optimizer, scheduler, val_metrics)
-                if config.use_drive:
-                    project_manager.backup()
+                save_checkpoint(
+                    model=model,
+                    checkpoint_dir=checkpoint_dir,
+                    epoch=epoch,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    metrics=val_metrics,
+                    is_best=True
+                )
         
         # Save final training summary
         visualizer.save_training_summary(val_metrics, config.model.architecture)
@@ -267,12 +286,6 @@ def train(config: Config, resume: bool = False):
     except Exception as e:
         logging.error(f"Error during training: {str(e)}")
         raise
-        
-    finally:
-        # Create final backup
-        print("Creating final backup...")
-        project_manager.backup()
-        project_manager.clean()
 
 def main():
     parser = argparse.ArgumentParser(description='Train Deepfake Detection Model')

@@ -96,14 +96,8 @@ def main():
     
     # Initialize project manager
     project_manager = ProjectManager(project_path=PROJECT_ROOT, use_drive=drive_available)
-    if drive_available:
-        try:
-            project_manager.restore()  # Try to restore from latest backup if available
-        except Exception as e:
-            logging.warning(f"Could not restore from backup: {str(e)}")
-            logging.info("Continuing with fresh start")
     
-    # Now setup paths and validate dataset (after potential restore)
+    # Now setup paths and validate dataset
     setup_paths()
     validate_dataset()
 
@@ -128,15 +122,6 @@ def main():
                 train_model(model_name, config, resume=args.resume)
     else:
         train_model(args.model, config, resume=args.resume)
-        
-    # Create new backup after training
-    if drive_available:
-        try:
-            project_manager.backup()
-            project_manager.clean()
-        except Exception as e:
-            logging.error(f"Failed to create backup: {str(e)}")
-            logging.warning("Training completed but backup failed")
 
 if __name__ == '__main__':
     try:
