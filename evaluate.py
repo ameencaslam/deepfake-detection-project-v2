@@ -42,8 +42,6 @@ def parse_args():
                        help='Batch size for evaluation')
     parser.add_argument('--image_size', type=int, default=Config().data.image_size,
                        help='Input image size')
-    parser.add_argument('--drive', type=bool, default=True,
-                       help='Use Google Drive for backup')
     
     args = parser.parse_args()
     return args
@@ -107,15 +105,33 @@ def compute_metrics(predictions, labels, probabilities):
     return metrics
 
 def main():
-    # Setup logging
-    setup_logging()
-    
     # Parse arguments
-    args = parse_args()
+    parser = argparse.ArgumentParser(description='Evaluate deepfake detection model')
     
-    # Initialize project manager and restore if needed
-    project_manager = ProjectManager(PROJECT_ROOT, use_drive=args.drive)
-    project_manager.restore()  # This will restore latest backup if available
+    # Get default paths from config
+    default_data = get_data_dir()
+    default_checkpoint_dir = get_checkpoint_dir()
+    
+    # Basic arguments with defaults
+    parser.add_argument('--model', type=str, default='efficientnet',
+                       choices=list(MODEL_REGISTRY.keys()),
+                       help=f'Model architecture to use. Available: {", ".join(MODEL_REGISTRY.keys())}')
+    parser.add_argument('--checkpoint', type=str, default=None,
+                       help='Path to model checkpoint. If not specified, will use latest from checkpoint directory')
+    parser.add_argument('--data_path', type=str, default=default_data,
+                       help='Path to test data')
+    parser.add_argument('--batch_size', type=int, default=Config().training.batch_size,
+                       help='Batch size for evaluation')
+    parser.add_argument('--image_size', type=int, default=Config().data.image_size,
+                       help='Input image size')
+    args = parser.parse_args()
+    
+    # Initialize project manager
+    project_manager = ProjectManager(PROJECT_ROOT)
+    
+    # Initialize hardware
+    hw_manager = HardwareManager()
+    hw_manager.print_hardware_info()
     
     # Initialize visualizer
     visualizer = TrainingVisualizer(Path(PROJECT_ROOT) / 'results' / args.model / 'evaluation')
@@ -135,10 +151,6 @@ def main():
         print(f"Using latest checkpoint: {args.checkpoint}")
     elif not os.path.exists(args.checkpoint):
         raise ValueError(f"Specified checkpoint not found: {args.checkpoint}")
-    
-    # Initialize hardware
-    hw_manager = HardwareManager()
-    hw_manager.print_hardware_info()
     
     # Create config for model initialization
     config = Config()
@@ -177,23 +189,10 @@ def main():
     predictions, labels, probabilities = evaluate(model, test_loader, hw_manager.device)
     metrics = compute_metrics(predictions, labels, probabilities)
     
-    # Plot and display evaluation results
-    print("\nGenerating and displaying evaluation plots...")
-    
-    # Plot confusion matrix
-    plt.figure(figsize=(10, 8))
+    # Plot evaluation results
     visualizer.plot_confusion_matrix(labels, predictions)
-    plt.show()
-    
-    # Plot ROC curve
-    plt.figure(figsize=(10, 8))
     visualizer.plot_roc_curve(labels, probabilities)
-    plt.show()
-    
-    # Plot prediction distribution
-    plt.figure(figsize=(10, 8))
     visualizer.plot_prediction_distribution(probabilities, labels)
-    plt.show()
     
     # Save evaluation summary
     visualizer.save_training_summary(metrics, args.model)
@@ -215,9 +214,6 @@ def main():
     print(f"False Negatives: {metrics['false_negatives']}")
     
     print(f"\nPlots saved in: {visualizer.save_dir}")
-    
-    # Backup evaluation results
-    project_manager.backup()
 
 if __name__ == '__main__':
     try:

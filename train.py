@@ -123,7 +123,7 @@ def train(config: Config, resume: bool = False):
             # Load checkpoint state
             logging.info("Loading model state from checkpoint")
             model.load_state_dict(checkpoint['model_state_dict'])
-            logging.info(f"Loaded model state from checkpoint with validation accuracy: {checkpoint['metrics'].get('accuracy', 0.0):.4f}")
+            logging.info(f"Loaded model state from checkpoint with validation loss: {checkpoint['metrics'].get('loss', float('inf')):.4f}")
             
             # Move model to device
             logging.info(f"Moving model to device: {hw_manager.device}")
@@ -137,8 +137,8 @@ def train(config: Config, resume: bool = False):
             
             # Set training state
             start_epoch = checkpoint['epoch'] + 1
-            best_val_acc = checkpoint['metrics'].get('accuracy', 0.0)
-            logging.info(f"Resuming from epoch {start_epoch} with best validation accuracy: {best_val_acc:.4f}")
+            best_val_loss = checkpoint['metrics'].get('loss', float('inf'))
+            logging.info(f"Resuming from epoch {start_epoch} with best validation loss: {best_val_loss:.4f}")
             
         else:
             if resume:
@@ -161,7 +161,7 @@ def train(config: Config, resume: bool = False):
             logging.info("Initializing fresh training state")
             optimizer = model.configure_optimizers()[0]
             start_epoch = 0
-            best_val_acc = 0.0
+            best_val_loss = float('inf')
             
         scheduler = None
         
@@ -284,11 +284,12 @@ def train(config: Config, resume: bool = False):
             val_metrics['loss'] /= val_metrics['num_samples']
             val_metrics['accuracy'] /= val_metrics['num_samples']
             
-            # End epoch and check if best model
-            is_best = progress.end_epoch(val_metrics)
+            # End epoch and display metrics
+            progress.end_epoch(val_metrics)
             
-            # Save checkpoint if best model (by validation loss)
-            if is_best:
+            # Save checkpoint if validation loss improved
+            if val_metrics['loss'] < best_val_loss:
+                best_val_loss = val_metrics['loss']
                 checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
                 save_checkpoint(
                     model=model,
@@ -299,6 +300,7 @@ def train(config: Config, resume: bool = False):
                     metrics=val_metrics,
                     is_best=True
                 )
+                logging.info(f"Saved new best model with validation loss: {best_val_loss:.4f}")
         
         # Save final training summary
         visualizer.save_training_summary(val_metrics, config.model.architecture)
