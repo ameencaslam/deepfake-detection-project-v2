@@ -23,8 +23,8 @@ class ProgressTracker:
         self.num_epochs = num_epochs
         self.num_batches = num_batches
         self.hardware_manager = hardware_manager
-        self.best_val_acc = 0.0
         self.best_val_loss = float('inf')
+        self.best_val_acc = 0.0
         self.best_epoch = 0
         self.current_epoch = 0
         self.epoch_start_time = None
@@ -35,9 +35,11 @@ class ProgressTracker:
         
     def reset_metrics(self):
         """Reset running metrics for new epoch."""
-        self.running_loss = 0.0
-        self.running_acc = 0.0
-        self.count = 0
+        self.train_metrics = {
+            'loss': 0.0,
+            'accuracy': 0.0,
+            'num_samples': 0
+        }
         
     def new_epoch(self, epoch: int):
         """Start tracking new epoch."""
@@ -54,32 +56,31 @@ class ProgressTracker:
             leave=True  # Keep the progress bar after completion
         )
         
-    def update_batch(self, batch_idx: int, loss: float, accuracy: float, pbar):
+    def update_batch(self, batch_idx: int, metrics: Dict[str, float], pbar):
         """Update metrics for current batch."""
-        # Update running averages
-        self.running_loss = (self.running_loss * self.count + loss) / (self.count + 1)
-        self.running_acc = (self.running_acc * self.count + accuracy) / (self.count + 1)
-        self.count += 1
+        # Update training metrics
+        self.train_metrics['loss'] = metrics['loss']
+        self.train_metrics['accuracy'] = metrics['accuracy']
+        self.train_metrics['num_samples'] = metrics['num_samples']
         
         # Update progress bar
         pbar.set_postfix({
-            'loss': f"{self.running_loss:.4f}",
-            'acc': f"{self.running_acc:.2%}"
+            'loss': f"{metrics['loss']:.4f}",
+            'acc': f"{metrics['accuracy']:.2%}"
         })
         pbar.update(1)
         
     def end_epoch(self, val_metrics: Dict[str, float]):
         """End epoch and display summary."""
         epoch_time = time.time() - self.epoch_start_time
-        avg_train_loss = self.running_loss / self.count
-        avg_train_acc = self.running_acc / self.count
         
-        # Update best metrics
-        val_acc = val_metrics['accuracy']
+        # Update best metrics based on validation loss
         val_loss = val_metrics['loss']
-        if val_acc > self.best_val_acc:
-            self.best_val_acc = val_acc
+        val_acc = val_metrics['accuracy']
+        is_best = val_loss < self.best_val_loss
+        if is_best:
             self.best_val_loss = val_loss
+            self.best_val_acc = val_acc
             self.best_epoch = self.current_epoch
             
         # Calculate time statistics
@@ -90,12 +91,12 @@ class ProgressTracker:
         # Display epoch summary
         print("\nEpoch Summary:")
         print("├── Training Metrics:")
-        print(f"│   ├── Loss: {avg_train_loss:.4f}")
-        print(f"│   └── Accuracy: {avg_train_acc:.2%}")
+        print(f"│   ├── Loss: {self.train_metrics['loss']:.4f}")
+        print(f"│   └── Accuracy: {self.train_metrics['accuracy']:.2%}")
         print("├── Validation Metrics:")
         print(f"│   ├── Loss: {val_loss:.4f}")
         print(f"│   └── Accuracy: {val_acc:.2%}")
-        print("├── Best Model:")
+        print("├── Best Model (by val loss):")
         print(f"│   ├── Epoch: {self.best_epoch + 1}")
         print(f"│   ├── Val Loss: {self.best_val_loss:.4f}")
         print(f"│   └── Val Accuracy: {self.best_val_acc:.2%}")
@@ -103,6 +104,8 @@ class ProgressTracker:
         print(f"    ├── Epoch Time: {epoch_time:.1f}s")
         print(f"    └── Estimated Remaining: {estimated_remaining/3600:.1f}h")
         print("\n")
+        
+        return is_best  # Return whether this is the best model
 
 class TrainingController:
     def __init__(self):

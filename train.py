@@ -197,6 +197,12 @@ def train(config: Config, resume: bool = False):
             progress_bar = progress.new_epoch(epoch)
             
             # Training phase
+            train_metrics = {
+                'loss': 0.0,
+                'accuracy': 0.0,
+                'num_samples': 0
+            }
+            
             for batch_idx, batch in enumerate(dataloaders['train']):
                 images, labels = batch
                 images = images.to(hw_manager.device)
@@ -215,16 +221,30 @@ def train(config: Config, resume: bool = False):
                 _, predicted = torch.max(outputs.data, 1)
                 accuracy = (predicted == labels).float().mean()
                 
-                # Update progress
+                # Accumulate batch metrics
+                batch_size = images.size(0)
+                train_metrics['loss'] += loss.item() * batch_size
+                train_metrics['accuracy'] += accuracy.item() * batch_size
+                train_metrics['num_samples'] += batch_size
+                
+                # Update progress with current averages
+                current_metrics = {
+                    'loss': train_metrics['loss'] / train_metrics['num_samples'],
+                    'accuracy': train_metrics['accuracy'] / train_metrics['num_samples'],
+                    'num_samples': train_metrics['num_samples']
+                }
                 progress.update_batch(
                     batch_idx=batch_idx,
-                    loss=loss.item(),
-                    accuracy=accuracy.item(),
+                    metrics=current_metrics,
                     pbar=progress_bar
                 )
             
             # End training phase
             progress_bar.close()
+            
+            # Calculate final training metrics
+            train_metrics['loss'] /= train_metrics['num_samples']
+            train_metrics['accuracy'] /= train_metrics['num_samples']
             
             # Validation phase
             model.eval()
@@ -251,9 +271,10 @@ def train(config: Config, resume: bool = False):
                     accuracy = (predicted == labels).float().mean()
                     
                     # Store results
-                    val_metrics['loss'] += loss.item() * images.size(0)
-                    val_metrics['accuracy'] += accuracy.item() * images.size(0)
-                    val_metrics['num_samples'] += images.size(0)
+                    batch_size = images.size(0)
+                    val_metrics['loss'] += loss.item() * batch_size
+                    val_metrics['accuracy'] += accuracy.item() * batch_size
+                    val_metrics['num_samples'] += batch_size
                     val_metrics['all_preds'].extend(predicted.cpu().numpy())
                     val_metrics['all_labels'].extend(labels.cpu().numpy())
                     probs = torch.softmax(outputs, dim=1)
@@ -263,12 +284,11 @@ def train(config: Config, resume: bool = False):
             val_metrics['loss'] /= val_metrics['num_samples']
             val_metrics['accuracy'] /= val_metrics['num_samples']
             
-            # End epoch and display metrics
-            progress.end_epoch(val_metrics)
+            # End epoch and check if best model
+            is_best = progress.end_epoch(val_metrics)
             
-            # Save checkpoint if best model
-            if val_metrics['accuracy'] > best_val_acc:
-                best_val_acc = val_metrics['accuracy']
+            # Save checkpoint if best model (by validation loss)
+            if is_best:
                 checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
                 save_checkpoint(
                     model=model,
