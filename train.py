@@ -78,8 +78,15 @@ def train(config: Config, resume: bool = False):
         checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
         checkpoint_path = checkpoint_dir / "checkpoint_best.pth"
         
+        # Debug checkpoint paths
         logging.info(f"Resume flag: {resume}")
+        logging.info(f"Project root: {config.base_path}")
+        logging.info(f"Checkpoints dir: {config.paths['checkpoints']}")
+        logging.info(f"Full checkpoint dir: {checkpoint_dir}")
         logging.info(f"Checking for checkpoint at: {checkpoint_path}")
+        logging.info(f"Checkpoint dir exists: {checkpoint_dir.exists()}")
+        if checkpoint_dir.exists():
+            logging.info(f"Checkpoint dir contents: {list(checkpoint_dir.glob('*'))}")
         logging.info(f"Checkpoint exists: {checkpoint_path.exists()}")
         
         if resume and checkpoint_path.exists():

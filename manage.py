@@ -110,6 +110,7 @@ class ProjectManager:
             backup_file = max(backups, key=os.path.getctime)
             
             # Create base directories
+            logger.info(f"Project path for restore: {self.project_path}")
             self.project_path.mkdir(parents=True, exist_ok=True)
             Path('/content/dataset').mkdir(parents=True, exist_ok=True)
             
@@ -137,13 +138,15 @@ class ProjectManager:
                             seen_patterns.add(part)
                     
                     cleaned_path = str(Path(*cleaned_parts))
-                    logger.debug(f"Cleaned path: {file} -> {cleaned_path}")
+                    logger.info(f"Processing path: {file} -> {cleaned_path}")
                     
                     # Determine target path
                     if cleaned_path.startswith('dataset/'):
                         target_path = Path('/content/dataset') / Path(cleaned_path).relative_to('dataset')
                     else:
                         target_path = self.project_path / cleaned_path
+                    
+                    logger.info(f"Target path: {target_path}")
                     
                     # Store the shortest path version
                     norm_path = str(target_path).lower()
@@ -155,8 +158,14 @@ class ProjectManager:
                     target_path.parent.mkdir(parents=True, exist_ok=True)
                     # Extract using original path but to cleaned target location
                     zip_ref.extract(source_path, target_path.parent)
-                    logger.info(f"Restored: {target_path.relative_to(self.project_path if self.project_path in target_path.parents else Path('/content'))}")
+                    logger.info(f"Restored: {target_path}")
                     
+                # Log final directory structure
+                logger.info("Final directory structure:")
+                for path in self.project_path.rglob('*'):
+                    if path.is_file():
+                        logger.info(f"  {path.relative_to(self.project_path)}")
+                
             logger.info("Restore completed")
             
         except Exception as e:
