@@ -56,8 +56,13 @@ class CrossAttentionModel(BaseModel):
             out_indices=(2, 3, 4)  # Get features from multiple scales
         )
         
-        # Feature dimensions for each scale
-        feature_dims = [40, 112, 320]  # EfficientNet-B0 dimensions
+        # Get feature dimensions
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, 3, 224, 224)
+            features = self.cnn(dummy_input)
+            self.feature_dims = [f.shape[1] for f in features]
+            self.total_feature_dim = sum(self.feature_dims)
+        
         hidden_dim = 256
         
         # Feature processing
@@ -66,7 +71,7 @@ class CrossAttentionModel(BaseModel):
                 nn.Conv2d(dim, hidden_dim, 1),
                 nn.BatchNorm2d(hidden_dim),
                 nn.ReLU(inplace=True)
-            ) for dim in feature_dims
+            ) for dim in self.feature_dims
         ])
         
         # Cross attention blocks
@@ -77,19 +82,27 @@ class CrossAttentionModel(BaseModel):
         
         # Global context
         self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.context_proj = nn.Linear(sum(feature_dims), hidden_dim)
+        self.context_proj = nn.Linear(self.total_feature_dim, hidden_dim)
         
-        # Layer norm and dropout
-        self.norm = nn.LayerNorm(hidden_dim)
-        self.dropout = nn.Dropout(dropout_rate)
+        # Feature reduction
+        self.feature_reduction = nn.Sequential(
+            nn.Linear(hidden_dim, 512),
+            nn.LayerNorm(512),
+            nn.GELU(),
+            nn.Dropout(dropout_rate * 0.5)
+        )
+        
+        # Feature normalization
+        self.feature_norm = nn.LayerNorm(512)
+        self.feature_dropout = nn.Dropout(dropout_rate)
         
         # Classifier
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.LayerNorm(hidden_dim // 2),
+            nn.Linear(512, 256),
+            nn.LayerNorm(256),
             nn.GELU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_dim // 2, num_classes)
+            nn.Dropout(dropout_rate * 0.5),
+            nn.Linear(256, num_classes)
         )
         
         # Label smoothing loss
@@ -104,7 +117,8 @@ class CrossAttentionModel(BaseModel):
             'pretrained': pretrained,
             'num_classes': num_classes,
             'dropout_rate': dropout_rate,
-            'label_smoothing': label_smoothing
+            'label_smoothing': label_smoothing,
+            'feature_dims': self.feature_dims
         }
         
     def _initialize_weights(self):
@@ -129,7 +143,6 @@ class CrossAttentionModel(BaseModel):
         global_context = self.context_proj(torch.cat(global_feats, dim=1))
         
         # Process features with cross attention
-        B = features[0].size(0)
         processed = []
         for feat in projected:
             # Reshape to sequence
@@ -154,9 +167,10 @@ class CrossAttentionModel(BaseModel):
         # Process features with cross attention
         features = self._process_features(features)
         
-        # Final processing
-        features = self.norm(features)
-        features = self.dropout(features)
+        # Feature processing
+        features = self.feature_reduction(features)
+        features = self.feature_norm(features)
+        features = self.feature_dropout(features)
         
         # Classification
         return self.classifier(features)
@@ -167,14 +181,15 @@ class CrossAttentionModel(BaseModel):
         cnn_params = list(self.cnn.parameters())
         attention_params = list(self.cross_attention.parameters()) + \
                          list(self.context_proj.parameters())
-        other_params = list(self.projections.parameters()) + \
-                      list(self.classifier.parameters()) + \
-                      list(self.norm.parameters())
-                      
+        new_params = list(self.projections.parameters()) + \
+                    list(self.feature_reduction.parameters()) + \
+                    list(self.classifier.parameters()) + \
+                    list(self.feature_norm.parameters())
+                    
         param_groups = [
             {'params': cnn_params, 'lr': 1e-4},        # Lower LR for pretrained
             {'params': attention_params, 'lr': 3e-4},  # Higher LR for attention
-            {'params': other_params, 'lr': 3e-4}       # Higher LR for new layers
+            {'params': new_params, 'lr': 3e-4}         # Higher LR for new layers
         ]
         
         # Use AdamW with weight decay

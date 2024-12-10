@@ -41,7 +41,7 @@ class CNNTransformerModel(BaseModel):
         }
         super().__init__(config)
         
-        # CNN backbone (ResNet50)
+        # CNN backbone (ResNet50) without classifier
         self.cnn = timm.create_model(
             'resnet50',
             pretrained=pretrained,
@@ -49,8 +49,14 @@ class CNNTransformerModel(BaseModel):
             features_only=True
         )
         
+        # Get feature dimensions
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, 3, 224, 224)
+            features = self.cnn(dummy_input)[-1]  # Get last layer features
+            self.feature_dim = features.shape[1]
+        
         # Feature processing
-        self.conv1x1 = nn.Conv2d(2048, 512, kernel_size=1)
+        self.conv1x1 = nn.Conv2d(self.feature_dim, 512, kernel_size=1)
         self.bn = nn.BatchNorm2d(512)
         self.relu = nn.ReLU(inplace=True)
         
@@ -62,16 +68,24 @@ class CNNTransformerModel(BaseModel):
             for _ in range(3)
         ])
         
-        # Layer norm and dropout
-        self.norm = nn.LayerNorm(transformer_dim)
-        self.dropout = nn.Dropout(dropout_rate)
+        # Feature reduction
+        self.feature_reduction = nn.Sequential(
+            nn.Linear(transformer_dim, 512),
+            nn.LayerNorm(512),
+            nn.GELU(),
+            nn.Dropout(dropout_rate * 0.5)
+        )
+        
+        # Feature normalization
+        self.feature_norm = nn.LayerNorm(512)
+        self.feature_dropout = nn.Dropout(dropout_rate)
         
         # Classifier
         self.classifier = nn.Sequential(
-            nn.Linear(transformer_dim, 256),
+            nn.Linear(512, 256),
             nn.LayerNorm(256),
             nn.GELU(),
-            nn.Dropout(dropout_rate),
+            nn.Dropout(dropout_rate * 0.5),
             nn.Linear(256, num_classes)
         )
         
@@ -87,14 +101,15 @@ class CNNTransformerModel(BaseModel):
             'pretrained': pretrained,
             'num_classes': num_classes,
             'dropout_rate': dropout_rate,
-            'label_smoothing': label_smoothing
+            'label_smoothing': label_smoothing,
+            'feature_dim': self.feature_dim
         }
         
     def _initialize_weights(self):
         """Initialize added layers."""
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
         
-        for m in [self.conv1x1, self.classifier]:
+        for m in [self.conv1x1, self.feature_reduction, self.classifier]:
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
@@ -128,9 +143,10 @@ class CNNTransformerModel(BaseModel):
         # Global average pooling
         features = features.mean(dim=1)
         
-        # Normalization and dropout
-        features = self.norm(features)
-        features = self.dropout(features)
+        # Feature processing
+        features = self.feature_reduction(features)
+        features = self.feature_norm(features)
+        features = self.feature_dropout(features)
         
         # Classification
         return self.classifier(features)
@@ -141,15 +157,16 @@ class CNNTransformerModel(BaseModel):
         cnn_params = list(self.cnn.parameters())
         transformer_params = list(self.transformer_blocks.parameters()) + \
                            [self.pos_embed]
-        other_params = list(self.conv1x1.parameters()) + \
-                      list(self.bn.parameters()) + \
-                      list(self.classifier.parameters()) + \
-                      list(self.norm.parameters())
-                      
+        new_params = list(self.conv1x1.parameters()) + \
+                    list(self.bn.parameters()) + \
+                    list(self.feature_reduction.parameters()) + \
+                    list(self.classifier.parameters()) + \
+                    list(self.feature_norm.parameters())
+                    
         param_groups = [
             {'params': cnn_params, 'lr': 1e-4},        # Lower LR for pretrained CNN
             {'params': transformer_params, 'lr': 3e-4}, # Higher LR for transformer
-            {'params': other_params, 'lr': 3e-4}       # Higher LR for new layers
+            {'params': new_params, 'lr': 3e-4}         # Higher LR for new layers
         ]
         
         # Use AdamW with weight decay

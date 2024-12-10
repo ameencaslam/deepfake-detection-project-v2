@@ -60,23 +60,43 @@ class TwoStreamModel(BaseModel):
             drop_rate=dropout_rate
         )
         
+        # Get feature dimensions
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, 3, 224, 224)
+            spatial_features = self.spatial_stream.forward_features(dummy_input)
+            self.spatial_dim = spatial_features.shape[1]
+        
         # Frequency stream
         self.frequency_stream = FrequencyBranch(in_channels=3)
+        self.freq_pool = nn.AdaptiveAvgPool2d(1)
         
-        # Feature fusion
-        spatial_features = self.spatial_stream.num_features
-        freq_features = 256 * 28 * 28  # From FrequencyBranch output
-        
-        self.fusion = nn.Sequential(
-            nn.Linear(spatial_features + freq_features, 512),
+        # Feature processing
+        total_features = self.spatial_dim + 256  # spatial + frequency features
+        self.feature_reduction = nn.Sequential(
+            nn.Linear(total_features, 512),
             nn.LayerNorm(512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout_rate),
-            nn.Linear(512, num_classes)
+            nn.GELU(),
+            nn.Dropout(dropout_rate * 0.5)
+        )
+        
+        # Feature normalization
+        self.feature_norm = nn.LayerNorm(512)
+        self.feature_dropout = nn.Dropout(dropout_rate)
+        
+        # Classifier
+        self.classifier = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.LayerNorm(256),
+            nn.GELU(),
+            nn.Dropout(dropout_rate * 0.5),
+            nn.Linear(256, num_classes)
         )
         
         # Label smoothing loss
         self.criterion = LabelSmoothingLoss(num_classes, smoothing=label_smoothing)
+        
+        # Initialize weights
+        self._initialize_weights()
         
         # Save hyperparameters
         self.save_hyperparameters = {
@@ -84,9 +104,18 @@ class TwoStreamModel(BaseModel):
             'pretrained': pretrained,
             'num_classes': num_classes,
             'dropout_rate': dropout_rate,
-            'label_smoothing': label_smoothing
+            'label_smoothing': label_smoothing,
+            'spatial_dim': self.spatial_dim
         }
         
+    def _initialize_weights(self):
+        """Initialize the weights of added layers."""
+        for m in [self.feature_reduction, self.classifier]:
+            if isinstance(m, nn.Linear):
+                nn.init.trunc_normal_(m.weight, std=0.02)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+                    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass combining spatial and frequency streams."""
         # Spatial stream
@@ -94,25 +123,35 @@ class TwoStreamModel(BaseModel):
         
         # Frequency stream
         freq_features = self.frequency_stream(x)
-        freq_features = freq_features.view(freq_features.size(0), -1)
+        freq_features = self.freq_pool(freq_features).flatten(1)
         
         # Combine features
         combined = torch.cat([spatial_features, freq_features], dim=1)
         
-        # Final classification
-        return self.fusion(combined)
+        # Feature processing
+        features = self.feature_reduction(combined)
+        features = self.feature_norm(features)
+        features = self.feature_dropout(features)
+        
+        # Classification
+        return self.classifier(features)
         
     def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
-        """Configure optimizer with different learning rates for streams."""
-        # Parameters with different learning rates
+        """Configure optimizer with layer-wise learning rates."""
+        # Group parameters
         spatial_params = list(self.spatial_stream.parameters())
-        other_params = list(self.frequency_stream.parameters()) + list(self.fusion.parameters())
+        freq_params = list(self.frequency_stream.parameters())
+        new_params = list(self.feature_reduction.parameters()) + \
+                    list(self.classifier.parameters()) + \
+                    list(self.feature_norm.parameters())
         
         param_groups = [
             {'params': spatial_params, 'lr': 1e-4},  # Lower LR for pretrained
-            {'params': other_params, 'lr': 3e-4}     # Higher LR for new parts
+            {'params': freq_params, 'lr': 3e-4},     # Higher LR for freq stream
+            {'params': new_params, 'lr': 3e-4}       # Higher LR for new layers
         ]
         
+        # Use AdamW with weight decay
         optimizer = torch.optim.AdamW(param_groups, weight_decay=0.01)
         
         # OneCycle scheduler

@@ -17,7 +17,7 @@ class XceptionModel(BaseModel):
         }
         super().__init__(config)
         
-        # Load pre-trained Xception
+        # Load pre-trained Xception without classifier
         self.model = timm.create_model(
             'xception',
             pretrained=pretrained,
@@ -25,22 +25,35 @@ class XceptionModel(BaseModel):
             drop_rate=dropout_rate
         )
         
-        # Additional feature processing
-        self.feature_norm = nn.LayerNorm(self.model.num_features)
+        # Get feature dimensions
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, 3, 224, 224)
+            features = self.model.forward_features(dummy_input)
+            self.feature_dim = features.shape[1]
+        
+        # Feature processing
+        self.feature_reduction = nn.Sequential(
+            nn.Linear(self.feature_dim * 2, 512),  # *2 for concatenated pooling features
+            nn.LayerNorm(512),
+            nn.GELU(),
+            nn.Dropout(dropout_rate * 0.5)
+        )
+        
+        # Feature normalization
+        self.feature_norm = nn.LayerNorm(512)
         self.feature_dropout = nn.Dropout(dropout_rate)
         
-        # Multi-scale feature aggregation
-        self.conv1x1 = nn.Conv2d(2048, 512, kernel_size=1)
-        self.gap = nn.AdaptiveAvgPool2d(1)
-        self.gmp = nn.AdaptiveMaxPool2d(1)
+        # Multi-scale pooling
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
         
         # Classifier
         self.classifier = nn.Sequential(
-            nn.Linear(1024, 512),
-            nn.LayerNorm(512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout_rate),
-            nn.Linear(512, num_classes)
+            nn.Linear(512, 256),
+            nn.LayerNorm(256),
+            nn.GELU(),
+            nn.Dropout(dropout_rate * 0.5),
+            nn.Linear(256, num_classes)
         )
         
         # Label smoothing loss
@@ -55,45 +68,43 @@ class XceptionModel(BaseModel):
             'pretrained': pretrained,
             'num_classes': num_classes,
             'dropout_rate': dropout_rate,
-            'label_smoothing': label_smoothing
+            'label_smoothing': label_smoothing,
+            'feature_dim': self.feature_dim
         }
         
     def _initialize_weights(self):
         """Initialize the weights of added layers."""
-        for m in [self.conv1x1, self.classifier]:
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+        for m in [self.feature_reduction, self.classifier]:
+            if isinstance(m, nn.Linear):
+                nn.init.trunc_normal_(m.weight, std=0.02)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.constant_(m.bias, 0)
-                
+                    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass with multi-scale feature aggregation."""
         # Get features from Xception
         features = self.model.forward_features(x)
         
-        # Multi-scale processing
-        conv_features = self.conv1x1(features)
-        gap_features = self.gap(conv_features).view(x.size(0), -1)
-        gmp_features = self.gmp(conv_features).view(x.size(0), -1)
+        # Multi-scale pooling
+        avg_features = self.global_pool(features).flatten(1)
+        max_features = self.max_pool(features).flatten(1)
         
         # Combine features
-        combined = torch.cat([gap_features, gmp_features], dim=1)
+        combined = torch.cat([avg_features, max_features], dim=1)
         
-        # Apply normalization and dropout
-        combined = self.feature_norm(combined)
-        combined = self.feature_dropout(combined)
+        # Feature processing
+        features = self.feature_reduction(combined)
+        features = self.feature_norm(features)
+        features = self.feature_dropout(features)
         
         # Classification
-        return self.classifier(combined)
+        return self.classifier(features)
         
     def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
         """Configure optimizer with layer-wise learning rates."""
-        # Group parameters by layers
+        # Group parameters
         backbone_params = list(self.model.parameters())
-        new_params = list(self.conv1x1.parameters()) + \
+        new_params = list(self.feature_reduction.parameters()) + \
                     list(self.classifier.parameters()) + \
                     list(self.feature_norm.parameters())
                     
