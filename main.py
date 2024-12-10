@@ -6,7 +6,8 @@ Usage:
 
 Options:
     --model MODEL       Model architecture (default: xception)
-                       Available: xception, cnn_transformer, cross_attention, two_stream
+                       Available: xception, cnn_transformer, cross_attention, two_stream,
+                                efficientnet, swin
     --epochs INT       Number of training epochs (default: 50)
     --batch INT        Batch size (default: 32)
     --lr FLOAT        Learning rate (default: 1e-4)
@@ -19,12 +20,18 @@ Model-specific options:
     --num_layers INT   Number of transformer layers (default: 3)
     --no_attention    Disable attention mechanism (for supported models)
 
-Example:
+Examples:
     # Train Xception model
     python main.py --model xception --epochs 50 --batch 32
     
     # Train CNN-Transformer with custom settings
     python main.py --model cnn_transformer --hidden_dim 768 --num_heads 12
+    
+    # Train EfficientNet model
+    python main.py --model efficientnet --batch 64
+    
+    # Train Swin Transformer
+    python main.py --model swin --hidden_dim 512 --num_heads 8
 """
 
 import argparse
@@ -33,6 +40,7 @@ import logging
 from pathlib import Path
 from config.base_config import Config
 from train import train
+from models.architectures import MODEL_REGISTRY
 
 def setup_logging():
     """Setup logging configuration."""
@@ -46,7 +54,7 @@ def main():
     
     # Basic options
     parser.add_argument('--model', type=str, default='xception',
-                      choices=['xception', 'cnn_transformer', 'cross_attention', 'two_stream'],
+                      choices=list(MODEL_REGISTRY.keys()),
                       help='Model architecture')
     parser.add_argument('--epochs', type=int, default=50,
                       help='Number of epochs')
@@ -73,6 +81,7 @@ def main():
     
     # Setup
     setup_logging()
+    logging.info(f"Training model: {args.model}")
     
     # Initialize config
     config = Config(base_path=os.path.dirname(os.path.abspath(__file__)))
