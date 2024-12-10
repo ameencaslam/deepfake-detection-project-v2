@@ -41,7 +41,7 @@ class DataConfig:
     """Data configuration."""
     def __init__(self):
         self.image_size = 224
-        self.num_workers = 4
+        self.num_workers = 2
         self.pin_memory = True
         self.prefetch_factor = 2
 

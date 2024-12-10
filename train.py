@@ -149,7 +149,7 @@ def train(config: Config, resume: bool = False):
         # Initialize progress tracker and controller
         progress = ProgressTracker(
             num_epochs=config.training.num_epochs,
-            steps_per_epoch=len(dataloaders['train']),
+            num_batches=len(dataloaders['train']),
             hardware_manager=hw_manager
         )
         controller = TrainingController()
