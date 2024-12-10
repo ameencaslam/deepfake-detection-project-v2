@@ -5,35 +5,34 @@ Usage:
     python main.py [OPTIONS]
 
 Options:
-    --model MODEL_NAME    Model to train (default: efficientnet)
-                         Available models: efficientnet, resnet, vit, all
-    --drive BOOL         Use Google Drive for backup (default: True)
-    --batch INT          Batch size (default: 32)
-    --epochs INT         Number of training epochs (default: from config.py)
-    --resume             Resume from latest checkpoint
+    --model MODEL       Model architecture (default: xception)
+                       Available: xception, cnn_transformer, cross_attention, two_stream
+    --epochs INT       Number of training epochs (default: 50)
+    --batch INT        Batch size (default: 32)
+    --lr FLOAT        Learning rate (default: 1e-4)
+    --resume          Resume from latest checkpoint
+    --data PATH       Path to dataset (default: ./data)
+    
+Model-specific options:
+    --hidden_dim INT   Hidden dimension size (default: 512)
+    --num_heads INT    Number of attention heads (default: 8)
+    --num_layers INT   Number of transformer layers (default: 3)
+    --no_attention    Disable attention mechanism (for supported models)
 
-Examples:
-    # Train efficientnet model with default settings
-    python main.py --model efficientnet
-
-    # Train with custom batch size and epochs
-    python main.py --model efficientnet --batch 64 --epochs 20
-
-    # Resume training from latest checkpoint
-    python main.py --model efficientnet --resume
-
-    # Train all available models
-    python main.py --model all
+Example:
+    # Train Xception model
+    python main.py --model xception --epochs 50 --batch 32
+    
+    # Train CNN-Transformer with custom settings
+    python main.py --model cnn_transformer --hidden_dim 768 --num_heads 12
 """
 
 import argparse
 import os
-from config.paths import *
+import logging
+from pathlib import Path
 from config.base_config import Config
 from train import train
-from manage import ProjectManager
-import logging
-from google.colab import drive
 
 def setup_logging():
     """Setup logging configuration."""
@@ -42,92 +41,63 @@ def setup_logging():
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 
-def setup_drive(use_drive: bool):
-    """Setup Google Drive if needed."""
-    if use_drive:
-        try:
-            # Check if drive is already mounted
-            if not os.path.exists('/content/drive/MyDrive'):
-                drive.mount('/content/drive')
-            
-            # Verify drive access
-            if not os.path.exists('/content/drive/MyDrive'):
-                logging.error("Drive mount point exists but MyDrive is not accessible")
-                return False
-                
-            os.makedirs(DRIVE_PATH, exist_ok=True)
-            logging.info("Google Drive mounted and verified successfully")
-            return True
-        except Exception as e:
-            logging.error(f"Failed to setup Google Drive: {str(e)}")
-            return False
-    return False
-
-def train_model(model_name: str, config: Config, resume: bool = False):
-    """Train a single model."""
-    logging.info(f"Training model: {model_name}")
-    config.model.architecture = model_name
-    train(config, resume=resume)
-
 def main():
-    # Parse arguments
-    parser = argparse.ArgumentParser(description='Train deepfake detection models')
-    parser.add_argument('--model', type=str, default='efficientnet',
-                       choices=list(MODELS.keys()) + ['all'],
-                       help=f'Model to train: {", ".join(list(MODELS.keys()) + ["all"])}')
-    parser.add_argument('--drive', type=bool, default=True,
-                       help='Use Google Drive for backup')
+    parser = argparse.ArgumentParser(description='Train deepfake detection model')
+    
+    # Basic options
+    parser.add_argument('--model', type=str, default='xception',
+                      choices=['xception', 'cnn_transformer', 'cross_attention', 'two_stream'],
+                      help='Model architecture')
+    parser.add_argument('--epochs', type=int, default=50,
+                      help='Number of epochs')
     parser.add_argument('--batch', type=int, default=32,
-                       help='Batch size')
-    parser.add_argument('--epochs', type=int, default=None,
-                       help='Number of epochs (default: use config value)')
+                      help='Batch size')
+    parser.add_argument('--lr', type=float, default=1e-4,
+                      help='Learning rate')
     parser.add_argument('--resume', action='store_true',
-                       help='Resume from latest checkpoint')
+                      help='Resume from latest checkpoint')
+    parser.add_argument('--data', type=str, default='./data',
+                      help='Path to dataset')
+    
+    # Model-specific options
+    parser.add_argument('--hidden_dim', type=int, default=512,
+                      help='Hidden dimension size')
+    parser.add_argument('--num_heads', type=int, default=8,
+                      help='Number of attention heads')
+    parser.add_argument('--num_layers', type=int, default=3,
+                      help='Number of transformer layers')
+    parser.add_argument('--no_attention', action='store_true',
+                      help='Disable attention mechanism')
+    
     args = parser.parse_args()
-
+    
     # Setup
     setup_logging()
-    logging.info(f"Resume training: {args.resume}")
     
-    # Setup Drive if needed
-    drive_available = False
-    if args.drive:
-        drive_available = setup_drive(args.drive)
+    # Initialize config
+    config = Config(base_path=os.path.dirname(os.path.abspath(__file__)))
     
-    # Initialize project manager
-    project_manager = ProjectManager(project_path=PROJECT_ROOT, use_drive=drive_available)
+    # Update config with command line arguments
+    config.model.architecture = args.model
+    config.training.num_epochs = args.epochs
+    config.training.batch_size = args.batch
+    config.training.learning_rate = args.lr
+    config.paths['data'] = args.data
     
-    # Now setup paths and validate dataset
-    setup_paths()
-    validate_dataset()
-
-    # Initialize configuration
-    config = Config(
-        base_path=PROJECT_ROOT,
-        use_drive=drive_available
-    )
-
-    # Update batch size if provided
-    if args.batch != 32:
-        config.training.batch_size = args.batch
-        
-    # Update number of epochs if provided
-    if args.epochs is not None:
-        config.training.num_epochs = args.epochs
-
-    # Train models
-    if args.model.lower() == 'all':
-        for model_name in MODELS.keys():
-            if model_name != 'all':
-                train_model(model_name, config, resume=args.resume)
-    else:
-        train_model(args.model, config, resume=args.resume)
-
-if __name__ == '__main__':
+    # Model-specific settings
+    config.model.hidden_dim = args.hidden_dim
+    config.model.num_heads = args.num_heads
+    config.model.num_layers = args.num_layers
+    config.model.use_attention = not args.no_attention
+    
+    # Start training
     try:
-        main()
+        train(config, resume=args.resume)
     except KeyboardInterrupt:
         logging.info("\nTraining interrupted by user")
     except Exception as e:
         logging.error(f"\nError during training: {str(e)}")
         raise
+
+if __name__ == '__main__':
+    main()

@@ -1,5 +1,6 @@
 """Model architectures package."""
 
+from typing import Dict, Any
 from models.architectures.efficientnet_b3 import EfficientNetModel
 from models.architectures.swin_transformer import SwinTransformerModel
 from models.architectures.two_stream import TwoStreamModel
@@ -16,14 +17,28 @@ MODEL_REGISTRY = {
     'cross_attention': CrossAttentionModel
 }
 
-def get_model(architecture: str, **kwargs):
-    """Get model from registry by name."""
+def get_model(architecture: str, **kwargs) -> Any:
+    """Get model instance by architecture name.
+    
+    Args:
+        architecture: Name of the model architecture
+        **kwargs: Model-specific arguments
+        
+    Returns:
+        Model instance
+        
+    Raises:
+        ValueError: If architecture is not supported
+    """
     if architecture not in MODEL_REGISTRY:
         raise ValueError(
-            f"Unknown architecture: {architecture}. "
+            f"Architecture {architecture} not supported. "
             f"Available architectures: {list(MODEL_REGISTRY.keys())}"
         )
-    return MODEL_REGISTRY[architecture](**kwargs)
+    
+    # Create model instance
+    model_class = MODEL_REGISTRY[architecture]
+    return model_class(**kwargs)
 
 __all__ = [
     'EfficientNetModel',

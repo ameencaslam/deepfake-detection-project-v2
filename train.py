@@ -82,95 +82,53 @@ def save_checkpoint(model, checkpoint_dir, epoch, optimizer, scheduler, metrics,
                 logging.info(f"Removed old checkpoint: {ckpt}")
 
 def train(config: Config, resume: bool = False):
-    """Train a model with the given configuration."""
+    """Train a model with the given configuration.
+    
+    Args:
+        config: Training configuration
+        resume: Whether to resume from checkpoint
+    """
     try:
-        # Initialize hardware
+        # Initialize hardware and paths
         hw_manager = HardwareManager()
-        hw_manager.print_hardware_info()
+        checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = checkpoint_dir / 'checkpoint_best.pth'
         
         # Initialize visualizer
-        results_path = Path(config.paths['results']) / config.model.architecture
-        visualizer = TrainingVisualizer(results_path)
+        visualizer = TrainingVisualizer(Path(config.paths['results']) / config.model.architecture)
         
-        # Check for local checkpoint
-        local_checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
-        local_checkpoint_path = local_checkpoint_dir / "checkpoint_best.pth"
+        # Create model
+        model = get_model(
+            config.model.architecture,
+            pretrained=config.model.pretrained,
+            num_classes=config.model.num_classes,
+            dropout_rate=config.model.dropout_rate,
+            label_smoothing=config.model.label_smoothing,
+            hidden_dim=getattr(config.model, 'hidden_dim', 512),
+            num_heads=getattr(config.model, 'num_heads', 8),
+            num_layers=getattr(config.model, 'num_layers', 3),
+            use_attention=getattr(config.model, 'use_attention', True)
+        )
+        model = model.to(hw_manager.device)
         
-        # Debug checkpoint paths
-        logging.info(f"Resume flag: {resume}")
-        logging.info(f"Looking for checkpoint in local directory only")
-        logging.info(f"Local checkpoint path: {local_checkpoint_path}")
-        logging.info(f"Local checkpoint exists: {local_checkpoint_path.exists()}")
-        if local_checkpoint_dir.exists():
-            logging.info(f"Local checkpoint dir contents: {list(local_checkpoint_dir.glob('*'))}")
+        # Configure optimizers
+        optimizer, scheduler = model.configure_optimizers()
         
-        if resume and local_checkpoint_path.exists():
-            # Load checkpoint
-            logging.info(f"Loading local checkpoint from: {local_checkpoint_path}")
-            checkpoint = torch.load(local_checkpoint_path, map_location=hw_manager.device)
-            logging.info(f"Checkpoint contents: {list(checkpoint.keys())}")
-            logging.info(f"Previous metrics: {checkpoint['metrics']}")
-            
-            # Create model without pretrained weights
-            logging.info("Creating model architecture without pretrained weights")
-            model = get_model(
-                config.model.architecture,
-                pretrained=False,
-                num_classes=config.model.num_classes,
-                dropout_rate=config.model.dropout_rate
-            )
-            
-            # Load checkpoint state
-            logging.info("Loading model state from checkpoint")
+        # Load checkpoint if resuming
+        start_epoch = 0
+        best_val_loss = float('inf')
+        if resume and checkpoint_path.exists():
+            checkpoint = torch.load(checkpoint_path)
             model.load_state_dict(checkpoint['model_state_dict'])
-            logging.info(f"Loaded model state from checkpoint with validation loss: {checkpoint['metrics'].get('loss', float('inf')):.4f}")
-            
-            # Move model to device
-            logging.info(f"Moving model to device: {hw_manager.device}")
-            model = model.to(hw_manager.device)
-            
-            # Setup optimizer and load its state
-            logging.info("Configuring optimizer")
-            optimizer = model.configure_optimizers()[0]
-            logging.info("Loading optimizer state from checkpoint")
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            
-            # Set training state
+            if 'scheduler_state_dict' in checkpoint and scheduler is not None:
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
-            best_val_loss = checkpoint['metrics'].get('loss', float('inf'))
-            logging.info(f"Resuming from epoch {start_epoch} with best validation loss: {best_val_loss:.4f}")
-            
-            # Reset start_epoch to 0 to respect user-specified epochs
-            start_epoch = 0
-            logging.info(f"Starting fresh count of {config.training.num_epochs} epochs as requested")
-            
-        else:
-            if resume:
-                logging.warning(f"Resume requested but no checkpoint found at {local_checkpoint_path}")
-            
-            # Create new model with pretrained weights
-            logging.info("Creating new model with pretrained weights")
-            model = get_model(
-                config.model.architecture,
-                pretrained=config.model.pretrained,
-                num_classes=config.model.num_classes,
-                dropout_rate=config.model.dropout_rate
-            )
-            
-            # Move model to device
-            logging.info(f"Moving model to device: {hw_manager.device}")
-            model = model.to(hw_manager.device)
-            
-            # Setup fresh training state
-            logging.info("Initializing fresh training state")
-            optimizer = model.configure_optimizers()[0]
-            start_epoch = 0
-            best_val_loss = float('inf')
-            
-        scheduler = None
+            best_val_loss = checkpoint['metrics']['loss']
+            logging.info(f"Resuming from checkpoint with validation loss: {best_val_loss:.4f}")
         
         # Get dataloaders
-        logging.info("Initializing dataloaders")
         dataloaders = {
             'train': DeepfakeDataset.get_dataloader(
                 data_path=config.paths['data'],
@@ -188,116 +146,76 @@ def train(config: Config, resume: bool = False):
             )
         }
         
-        # Initialize progress tracker
+        # Initialize progress tracker and controller
         progress = ProgressTracker(
             num_epochs=config.training.num_epochs,
-            num_batches=len(dataloaders['train']),
+            steps_per_epoch=len(dataloaders['train']),
             hardware_manager=hw_manager
         )
+        controller = TrainingController()
         
         # Training loop
         for epoch in range(start_epoch, config.training.num_epochs):
-            model.train()
-            progress_bar = progress.new_epoch(epoch)
+            # Check for stop signal
+            if controller.should_stop():
+                logging.info("Training stopped by user")
+                break
             
             # Training phase
-            train_metrics = {
-                'loss': 0.0,
-                'accuracy': 0.0,
-                'num_samples': 0
-            }
+            model.train()
+            train_metrics = {}
+            progress_bar = progress.new_epoch(epoch)
             
             for batch_idx, batch in enumerate(dataloaders['train']):
-                images, labels = batch
-                images = images.to(hw_manager.device)
-                labels = labels.to(hw_manager.device)
+                # Training step
+                batch_metrics = model.training_step(batch)
                 
-                # Forward pass
+                # Backward pass and optimization
                 optimizer.zero_grad()
-                outputs = model(images)
-                loss = torch.nn.CrossEntropyLoss()(outputs, labels)
-                
-                # Backward pass
-                loss.backward()
+                batch_metrics['loss'].backward()
                 optimizer.step()
                 
                 # Update metrics
-                _, predicted = torch.max(outputs.data, 1)
-                accuracy = (predicted == labels).float().mean()
+                for key in ['loss', 'accuracy']:
+                    if key not in train_metrics:
+                        train_metrics[key] = 0.0
+                    train_metrics[key] += batch_metrics[key].item()
                 
-                # Accumulate batch metrics
-                batch_size = images.size(0)
-                train_metrics['loss'] += loss.item() * batch_size
-                train_metrics['accuracy'] += accuracy.item() * batch_size
-                train_metrics['num_samples'] += batch_size
-                
-                # Update progress with current averages
-                current_metrics = {
-                    'loss': train_metrics['loss'] / train_metrics['num_samples'],
-                    'accuracy': train_metrics['accuracy'] / train_metrics['num_samples'],
-                    'num_samples': train_metrics['num_samples']
-                }
-                progress.update_batch(
-                    batch_idx=batch_idx,
-                    metrics=current_metrics,
-                    pbar=progress_bar
-                )
+                # Update progress
+                progress_bar.update(1)
             
-            # End training phase
-            progress_bar.close()
-            
-            # Calculate final training metrics
-            train_metrics['loss'] /= train_metrics['num_samples']
-            train_metrics['accuracy'] /= train_metrics['num_samples']
+            # Average training metrics
+            num_batches = len(dataloaders['train'])
+            for key in train_metrics:
+                train_metrics[key] /= num_batches
             
             # Validation phase
             model.eval()
-            val_metrics = {
-                'loss': 0.0,
-                'accuracy': 0.0,
-                'num_samples': 0,
-                'all_preds': [],
-                'all_labels': [],
-                'all_probs': []
-            }
+            val_metrics = {}
             
             with torch.no_grad():
-                for images, labels in dataloaders['val']:
-                    images = images.to(hw_manager.device)
-                    labels = labels.to(hw_manager.device)
+                for batch in dataloaders['val']:
+                    # Validation step
+                    batch_metrics = model.validation_step(batch)
                     
-                    # Forward pass
-                    outputs = model(images)
-                    loss = torch.nn.CrossEntropyLoss()(outputs, labels)
-                    
-                    # Get predictions
-                    _, predicted = torch.max(outputs.data, 1)
-                    accuracy = (predicted == labels).float().mean()
-                    
-                    # Store results
-                    batch_size = images.size(0)
-                    val_metrics['loss'] += loss.item() * batch_size
-                    val_metrics['accuracy'] += accuracy.item() * batch_size
-                    val_metrics['num_samples'] += batch_size
-                    val_metrics['all_preds'].extend(predicted.cpu().numpy())
-                    val_metrics['all_labels'].extend(labels.cpu().numpy())
-                    probs = torch.softmax(outputs, dim=1)
-                    val_metrics['all_probs'].extend(probs[:, 1].cpu().numpy())
+                    # Update metrics
+                    for key in ['loss', 'accuracy']:
+                        if key not in val_metrics:
+                            val_metrics[key] = 0.0
+                        val_metrics[key] += batch_metrics[key].item()
             
-            # Calculate average metrics
-            val_metrics['loss'] /= val_metrics['num_samples']
-            val_metrics['accuracy'] /= val_metrics['num_samples']
+            # Average validation metrics
+            num_batches = len(dataloaders['val'])
+            for key in val_metrics:
+                val_metrics[key] /= num_batches
             
-            # End epoch and display metrics
-            progress.end_epoch(val_metrics)
-            
-            # Save training summary
-            visualizer.save_training_summary(val_metrics, config.model.architecture)
+            # Update progress and check if best model
+            is_best = val_metrics['loss'] < best_val_loss
+            if is_best:
+                best_val_loss = val_metrics['loss']
             
             # Save checkpoint if validation loss improved
-            if val_metrics['loss'] < best_val_loss:
-                best_val_loss = val_metrics['loss']
-                checkpoint_dir = Path(config.paths['checkpoints']) / config.model.architecture
+            if is_best:
                 save_checkpoint(
                     model=model,
                     checkpoint_dir=checkpoint_dir,
@@ -307,8 +225,28 @@ def train(config: Config, resume: bool = False):
                     metrics=val_metrics,
                     is_best=True
                 )
-                logging.info(f"Saved new best model with validation loss: {best_val_loss:.4f}")
-        
+                logging.info(f"Saved new best model with validation loss: {val_metrics['loss']:.4f}")
+            
+            # Update visualizations
+            visualizer.update_training_plots(
+                epoch=epoch,
+                train_metrics=train_metrics,
+                val_metrics=val_metrics
+            )
+            
+            # Step scheduler
+            if scheduler is not None:
+                scheduler.step()
+            
+            # Log epoch summary
+            logging.info(
+                f"Epoch {epoch}/{config.training.num_epochs-1} - "
+                f"Train Loss: {train_metrics['loss']:.4f}, "
+                f"Train Acc: {train_metrics['accuracy']:.4f}, "
+                f"Val Loss: {val_metrics['loss']:.4f}, "
+                f"Val Acc: {val_metrics['accuracy']:.4f}"
+            )
+    
     except Exception as e:
         logging.error(f"Error during training: {str(e)}")
         raise

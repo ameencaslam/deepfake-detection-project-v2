@@ -1,17 +1,18 @@
-from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
+from abc import ABC, abstractmethod
 from typing import Dict, Any, Tuple, Optional
-import os
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import GradScaler
+import logging
 
 class BaseModel(nn.Module, ABC):
+    """Base model class that all models should inherit from."""
+    
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
-        self.config = config
         self.device = config['device']
         self.mixed_precision = config.get('mixed_precision', True)
-        self.scaler = GradScaler() if self.mixed_precision else None
+        self.scaler = GradScaler('cuda') if self.mixed_precision else None
         
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -19,78 +20,162 @@ class BaseModel(nn.Module, ABC):
         pass
         
     @abstractmethod
-    def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
-        """Configure optimizer and learning rate scheduler."""
+    def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler._LRScheduler]]:
+        """Configure optimizer and scheduler for the model.
+        
+        Returns:
+            Tuple of (optimizer, scheduler)
+        """
         pass
         
+    @abstractmethod
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Perform a single training step."""
-        images, labels = batch
-        images, labels = images.to(self.device), labels.to(self.device)
+        """Perform a single training step.
         
-        # Mixed precision training
-        with autocast(enabled=self.mixed_precision):
-            outputs = self(images)
-            loss = nn.CrossEntropyLoss()(outputs, labels)
+        Args:
+            batch: Tuple of (inputs, targets)
             
-        # Calculate accuracy
-        _, predicted = torch.max(outputs.data, 1)
-        accuracy = (predicted == labels).float().mean()
+        Returns:
+            Dict containing at minimum {'loss': loss_tensor}
+        """
+        pass
         
-        return {
-            'loss': loss,
-            'accuracy': accuracy,
-            'predictions': predicted,
+    @abstractmethod
+    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Perform a single validation step.
+        
+        Args:
+            batch: Tuple of (inputs, targets)
+            
+        Returns:
+            Dict containing validation metrics
+        """
+        pass
+        
+    def train_epoch(self, train_loader: torch.utils.data.DataLoader, 
+                   optimizer: torch.optim.Optimizer) -> Dict[str, float]:
+        """Train for one epoch.
+        
+        Args:
+            train_loader: Training data loader
+            optimizer: Model optimizer
+            
+        Returns:
+            Dict of epoch metrics
+        """
+        self.train()
+        epoch_metrics = {
+            'loss': 0.0,
+            'accuracy': 0.0,
+            'num_samples': 0
         }
         
-    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Perform a single validation step."""
-        self.eval()
-        with torch.no_grad():
-            metrics = self.training_step(batch)
-        self.train()
-        return metrics
+        for batch_idx, batch in enumerate(train_loader):
+            # Zero gradients
+            optimizer.zero_grad()
+            
+            # Forward pass with mixed precision
+            with torch.cuda.amp.autocast(enabled=self.mixed_precision):
+                metrics = self.training_step(batch)
+            
+            # Backward pass with gradient scaling
+            if self.mixed_precision:
+                self.scaler.scale(metrics['loss']).backward()
+                self.scaler.step(optimizer)
+                self.scaler.update()
+            else:
+                metrics['loss'].backward()
+                optimizer.step()
+            
+            # Update epoch metrics
+            batch_size = batch[0].size(0)
+            epoch_metrics['loss'] += metrics['loss'].item() * batch_size
+            epoch_metrics['accuracy'] += metrics['accuracy'].item() * batch_size
+            epoch_metrics['num_samples'] += batch_size
         
-    def save_checkpoint(self, path: str, epoch: int, optimizer: torch.optim.Optimizer,
-                       scheduler: torch.optim.lr_scheduler._LRScheduler,
-                       metrics: Dict[str, float]):
-        """Save model checkpoint."""
+        # Calculate averages
+        for key in ['loss', 'accuracy']:
+            epoch_metrics[key] /= epoch_metrics['num_samples']
+            
+        return epoch_metrics
+        
+    def validate_epoch(self, val_loader: torch.utils.data.DataLoader) -> Dict[str, float]:
+        """Validate for one epoch.
+        
+        Args:
+            val_loader: Validation data loader
+            
+        Returns:
+            Dict of validation metrics
+        """
+        self.eval()
+        val_metrics = {
+            'loss': 0.0,
+            'accuracy': 0.0,
+            'num_samples': 0,
+            'predictions': [],
+            'targets': []
+        }
+        
+        with torch.no_grad():
+            for batch_idx, batch in enumerate(val_loader):
+                # Validation step
+                metrics = self.validation_step(batch)
+                
+                # Update validation metrics
+                batch_size = batch[0].size(0)
+                val_metrics['loss'] += metrics['loss'].item() * batch_size
+                val_metrics['accuracy'] += metrics['accuracy'].item() * batch_size
+                val_metrics['num_samples'] += batch_size
+                
+                # Store predictions and targets
+                val_metrics['predictions'].extend(metrics['predictions'].cpu().numpy())
+                val_metrics['targets'].extend(batch[1].cpu().numpy())
+        
+        # Calculate averages
+        for key in ['loss', 'accuracy']:
+            val_metrics[key] /= val_metrics['num_samples']
+            
+        return val_metrics
+        
+    def save_checkpoint(self, path: str, optimizer: torch.optim.Optimizer, 
+                       epoch: int, metrics: Dict[str, Any]):
+        """Save model checkpoint.
+        
+        Args:
+            path: Path to save checkpoint
+            optimizer: Model optimizer
+            epoch: Current epoch
+            metrics: Current metrics
+        """
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
-            'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
-            'metrics': metrics,
-            'config': self.config
+            'metrics': metrics
         }
-        
         torch.save(checkpoint, path)
+        logging.info(f"Saved checkpoint to: {path}")
         
-    def load_checkpoint(self, path: str, optimizer: Optional[torch.optim.Optimizer] = None,
-                       scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None) -> Dict[str, Any]:
-        """Load model checkpoint."""
+    def load_checkpoint(self, path: str) -> Dict[str, Any]:
+        """Load model checkpoint.
+        
+        Args:
+            path: Path to checkpoint file
+            
+        Returns:
+            Dict containing checkpoint data
+        """
+        logging.info(f"Loading checkpoint from: {path}")
         checkpoint = torch.load(path, map_location=self.device)
-        
         self.load_state_dict(checkpoint['model_state_dict'])
-        
-        if optimizer is not None:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            
-        if scheduler is not None and checkpoint['scheduler_state_dict'] is not None:
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            
         return checkpoint
         
-    def get_progress_bar_dict(self) -> Dict[str, Any]:
-        """Get metrics for progress bar display."""
-        items = super().get_progress_bar_dict()
-        items.pop("v_num", None)
-        return items
+    @abstractmethod
+    def get_model_specific_args(self) -> Dict[str, Any]:
+        """Get model-specific arguments.
         
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        """Add model specific arguments to parser."""
-        parser = parent_parser.add_argument_group("BaseModel")
-        parser.add_argument("--learning_rate", type=float, default=1e-4)
-        parser.add_argument("--weight_decay", type=float, default=1e-5)
-        return parent_parser 
+        Returns:
+            Dict of argument names and default values
+        """
+        pass

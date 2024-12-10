@@ -1,27 +1,30 @@
 import torch
 import torch.nn as nn
 import timm
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from models.base_model import BaseModel
 from utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
 import logging
 
 class SwinTransformerModel(BaseModel):
+    """Swin Transformer model for image classification."""
+    
     def __init__(self,
                  pretrained: bool = True,
                  num_classes: int = 2,
                  dropout_rate: float = 0.3,
-                 label_smoothing: float = 0.1):
+                 label_smoothing: float = 0.1,
+                 **kwargs):
         config = {
             'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
             'mixed_precision': True
         }
         super().__init__(config)
         
-        # Load Swin Transformer without pretrained weights initially
+        # Load model without pretrained weights initially
         self.model = timm.create_model(
             'swin_base_patch4_window7_224',
-            pretrained=False,  # Always initialize without pretrained weights
+            pretrained=False,
             num_classes=0,  # Remove classifier
             drop_rate=dropout_rate
         )
@@ -35,14 +38,12 @@ class SwinTransformerModel(BaseModel):
                                  if not k.startswith('head')}
             self.model.load_state_dict(backbone_state_dict, strict=False)
             logging.info("Pretrained backbone weights loaded")
-        else:
-            logging.info("Initializing model without pretrained weights")
         
         # Get feature dimensions
         with torch.no_grad():
             dummy_input = torch.zeros(1, 3, 224, 224)
             features = self.model.forward_features(dummy_input)
-            self.feature_dim = features.shape[-1]  # Get feature dimension
+            self.feature_dim = features.shape[-1]
         
         # Feature processing
         self.feature_norm = nn.LayerNorm(512)
@@ -64,14 +65,14 @@ class SwinTransformerModel(BaseModel):
             nn.Linear(256, num_classes)
         )
         
-        # Label smoothing loss
+        # Loss function
         self.criterion = LabelSmoothingLoss(num_classes, smoothing=label_smoothing)
         
         # Initialize weights
         self._initialize_weights()
         
         # Save hyperparameters
-        self.save_hyperparameters = {
+        self.hparams = {
             'architecture': 'swin_transformer',
             'pretrained': pretrained,
             'num_classes': num_classes,
@@ -81,7 +82,7 @@ class SwinTransformerModel(BaseModel):
         }
         
     def _initialize_weights(self):
-        """Initialize added layers."""
+        """Initialize model weights."""
         for m in [self.feature_reduction, self.classifier]:
             if isinstance(m, nn.Linear):
                 nn.init.trunc_normal_(m.weight, std=0.02)
@@ -89,8 +90,8 @@ class SwinTransformerModel(BaseModel):
                     nn.init.constant_(m.bias, 0)
                     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass."""
-        # Get features from Swin Transformer
+        """Forward pass of the model."""
+        # Get features from backbone
         features = self.model.forward_features(x)  # [B, N, C]
         
         # Global average pooling
@@ -104,8 +105,48 @@ class SwinTransformerModel(BaseModel):
         # Classification
         return self.classifier(features)
         
-    def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
-        """Configure optimizer with layer-wise learning rates."""
+    def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Perform a single training step."""
+        images, labels = batch
+        images = images.to(self.device)
+        labels = labels.to(self.device)
+        
+        # Forward pass
+        outputs = self(images)
+        loss = self.criterion(outputs, labels)
+        
+        # Calculate accuracy
+        _, predicted = torch.max(outputs.data, 1)
+        accuracy = (predicted == labels).float().mean()
+        
+        return {
+            'loss': loss,
+            'accuracy': accuracy,
+            'predictions': predicted
+        }
+        
+    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Perform a single validation step."""
+        images, labels = batch
+        images = images.to(self.device)
+        labels = labels.to(self.device)
+        
+        # Forward pass
+        outputs = self(images)
+        loss = self.criterion(outputs, labels)
+        
+        # Calculate accuracy
+        _, predicted = torch.max(outputs.data, 1)
+        accuracy = (predicted == labels).float().mean()
+        
+        return {
+            'loss': loss,
+            'accuracy': accuracy,
+            'predictions': predicted
+        }
+        
+    def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler._LRScheduler]]:
+        """Configure optimizer and scheduler."""
         # Group parameters
         backbone_params = list(self.model.parameters())
         new_params = list(self.feature_reduction.parameters()) + \
@@ -135,30 +176,11 @@ class SwinTransformerModel(BaseModel):
         
         return optimizer, scheduler
         
-    def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Training step with label smoothing."""
-        images, labels = batch
-        images, labels = images.to(self.device), labels.to(self.device)
-        
-        # Mixed precision training
-        with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-            outputs = self(images)
-            loss = self.criterion(outputs, labels)
-            
-        # Calculate accuracy
-        _, predicted = torch.max(outputs.data, 1)
-        accuracy = (predicted == labels).float().mean()
-        
+    def get_model_specific_args(self) -> Dict[str, Any]:
+        """Get model-specific arguments."""
         return {
-            'loss': loss,
-            'accuracy': accuracy,
-            'predictions': predicted
+            'dropout_rate': 0.3,
+            'label_smoothing': 0.1,
+            'window_size': 7,
+            'num_heads': 8
         }
-        
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        """Add model specific arguments."""
-        parser = parent_parser.add_argument_group("SwinTransformer")
-        parser.add_argument("--dropout_rate", type=float, default=0.3)
-        parser.add_argument("--label_smoothing", type=float, default=0.1)
-        return parent_parser
