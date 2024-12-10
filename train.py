@@ -287,6 +287,9 @@ def train(config: Config, resume: bool = False):
             # End epoch and display metrics
             progress.end_epoch(val_metrics)
             
+            # Save training summary
+            visualizer.save_training_summary(val_metrics, config.model.architecture)
+            
             # Save checkpoint if validation loss improved
             if val_metrics['loss'] < best_val_loss:
                 best_val_loss = val_metrics['loss']
@@ -301,9 +304,6 @@ def train(config: Config, resume: bool = False):
                     is_best=True
                 )
                 logging.info(f"Saved new best model with validation loss: {best_val_loss:.4f}")
-        
-        # Save final training summary
-        visualizer.save_training_summary(val_metrics, config.model.architecture)
         
     except Exception as e:
         logging.error(f"Error during training: {str(e)}")
