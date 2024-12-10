@@ -12,7 +12,7 @@ Options:
     --batch INT        Batch size (default: 32)
     --lr FLOAT        Learning rate (default: 1e-4)
     --resume          Resume from latest checkpoint
-    --data PATH       Path to dataset (default: ./data)
+    --data PATH       Path to dataset (default: /content/3body-filtered-v2-10k)
     
 Model-specific options:
     --hidden_dim INT   Hidden dimension size (default: 512)
@@ -64,7 +64,7 @@ def main():
                       help='Learning rate')
     parser.add_argument('--resume', action='store_true',
                       help='Resume from latest checkpoint')
-    parser.add_argument('--data', type=str, default='./data',
+    parser.add_argument('--data', type=str, default='/content/3body-filtered-v2-10k',
                       help='Path to dataset')
     
     # Model-specific options
