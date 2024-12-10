@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 import timm
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Dict, Any, Tuple
 from models.base_model import BaseModel
 from utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
+import logging
 
 class SwinTransformerModel(BaseModel):
-    def __init__(self, 
+    def __init__(self,
                  pretrained: bool = True,
                  num_classes: int = 2,
                  dropout_rate: float = 0.3,
@@ -17,14 +18,25 @@ class SwinTransformerModel(BaseModel):
         }
         super().__init__(config)
         
-        # Load pre-trained Swin Transformer without classifier
+        # Load Swin Transformer without pretrained weights initially
         self.model = timm.create_model(
             'swin_base_patch4_window7_224',
-            pretrained=pretrained,
+            pretrained=False,  # Always initialize without pretrained weights
             num_classes=0,  # Remove classifier
-            drop_rate=dropout_rate,
-            drop_path_rate=0.2,  # Stochastic depth
+            drop_rate=dropout_rate
         )
+        
+        # Load pretrained weights if requested
+        if pretrained:
+            logging.info("Loading pretrained backbone weights...")
+            pretrained_model = timm.create_model('swin_base_patch4_window7_224', pretrained=True)
+            # Only load backbone weights, not the classifier
+            backbone_state_dict = {k: v for k, v in pretrained_model.state_dict().items() 
+                                 if not k.startswith('head')}
+            self.model.load_state_dict(backbone_state_dict, strict=False)
+            logging.info("Pretrained backbone weights loaded")
+        else:
+            logging.info("Initializing model without pretrained weights")
         
         # Get feature dimensions
         with torch.no_grad():
@@ -33,20 +45,15 @@ class SwinTransformerModel(BaseModel):
             self.feature_dim = features.shape[-1]  # Get feature dimension
         
         # Feature processing
-        self.feature_reduction = nn.Sequential(
-            nn.Linear(self.feature_dim * 2, 512),  # *2 for concatenated pooling features
-            nn.LayerNorm(512),
-            nn.GELU(),
-            nn.Dropout(dropout_rate * 0.5)
-        )
-        
-        # Feature normalization
         self.feature_norm = nn.LayerNorm(512)
         self.feature_dropout = nn.Dropout(dropout_rate)
         
-        # Multi-scale pooling
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        # Feature reduction
+        self.feature_reduction = nn.Sequential(
+            nn.Linear(self.feature_dim, 512),
+            nn.GELU(),
+            nn.Dropout(dropout_rate * 0.5)
+        )
         
         # Classifier
         self.classifier = nn.Sequential(
@@ -74,7 +81,7 @@ class SwinTransformerModel(BaseModel):
         }
         
     def _initialize_weights(self):
-        """Initialize the weights of added layers."""
+        """Initialize added layers."""
         for m in [self.feature_reduction, self.classifier]:
             if isinstance(m, nn.Linear):
                 nn.init.trunc_normal_(m.weight, std=0.02)
@@ -82,24 +89,15 @@ class SwinTransformerModel(BaseModel):
                     nn.init.constant_(m.bias, 0)
                     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass with multi-scale feature aggregation."""
+        """Forward pass."""
         # Get features from Swin Transformer
         features = self.model.forward_features(x)  # [B, N, C]
         
-        # Reshape features for 2D pooling
-        B, N, C = features.shape
-        H = W = int(N ** 0.5)  # Features are from a square grid
-        features = features.transpose(1, 2).reshape(B, C, H, W)
-        
-        # Multi-scale pooling
-        avg_features = self.global_pool(features).flatten(1)
-        max_features = self.max_pool(features).flatten(1)
-        
-        # Combine features
-        combined = torch.cat([avg_features, max_features], dim=1)
+        # Global average pooling
+        features = features.mean(dim=1)  # [B, C]
         
         # Feature processing
-        features = self.feature_reduction(combined)
+        features = self.feature_reduction(features)
         features = self.feature_norm(features)
         features = self.feature_dropout(features)
         
@@ -119,10 +117,15 @@ class SwinTransformerModel(BaseModel):
             {'params': new_params, 'lr': 3e-4}          # Higher LR for new layers
         ]
         
-        # Use AdamW with weight decay
-        optimizer = torch.optim.AdamW(param_groups, weight_decay=0.05)  # Higher weight decay for transformers
+        # Get optimizer with proper weight decay
+        optimizer = get_optimizer(
+            self,
+            optimizer_name='adamw',
+            learning_rate=1e-4,
+            weight_decay=0.05  # Higher weight decay for transformers
+        )
         
-        # OneCycle scheduler
+        # Get scheduler
         scheduler = get_scheduler(
             optimizer,
             scheduler_name='onecycle',
@@ -133,7 +136,7 @@ class SwinTransformerModel(BaseModel):
         return optimizer, scheduler
         
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Perform a single training step with label smoothing."""
+        """Training step with label smoothing."""
         images, labels = batch
         images, labels = images.to(self.device), labels.to(self.device)
         
@@ -154,8 +157,8 @@ class SwinTransformerModel(BaseModel):
         
     @staticmethod
     def add_model_specific_args(parent_parser):
-        """Add model specific arguments to parser."""
+        """Add model specific arguments."""
         parser = parent_parser.add_argument_group("SwinTransformer")
         parser.add_argument("--dropout_rate", type=float, default=0.3)
         parser.add_argument("--label_smoothing", type=float, default=0.1)
-        return parent_parser 
+        return parent_parser

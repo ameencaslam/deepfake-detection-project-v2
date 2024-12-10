@@ -1,44 +1,11 @@
 import torch
 import torch.nn as nn
 import timm
-from typing import Dict, Any, Tuple, List, Optional
+import torch.fft as fft
+from typing import Dict, Any, Tuple
 from models.base_model import BaseModel
 from utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
-import torch.fft as fft
-
-class FrequencyBranch(nn.Module):
-    """Frequency domain processing branch."""
-    def __init__(self, in_channels: int = 3):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_channels*2, 64, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(128)
-        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm2d(256)
-        
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.dropout = nn.Dropout(0.3)
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Convert to frequency domain
-        ffted = fft.fft2(x, dim=(-2, -1))
-        ffted = torch.cat([ffted.real, ffted.imag], dim=1)
-        
-        # Process frequency information
-        x = self.relu(self.bn1(self.conv1(ffted)))
-        x = self.maxpool(x)
-        x = self.dropout(x)
-        
-        x = self.relu(self.bn2(self.conv2(x)))
-        x = self.maxpool(x)
-        x = self.dropout(x)
-        
-        x = self.relu(self.bn3(self.conv3(x)))
-        x = self.maxpool(x)
-        
-        return x
+import logging
 
 class TwoStreamModel(BaseModel):
     def __init__(self,
@@ -52,39 +19,58 @@ class TwoStreamModel(BaseModel):
         }
         super().__init__(config)
         
-        # Spatial stream (using EfficientNet)
+        # Load EfficientNet without pretrained weights initially
         self.spatial_stream = timm.create_model(
-            'efficientnet_b0',  # Lighter model for spatial stream
-            pretrained=pretrained,
+            'efficientnet_b0',
+            pretrained=False,  # Always initialize without pretrained weights
             num_classes=0,  # Remove classifier
             drop_rate=dropout_rate
         )
         
+        # Load pretrained weights if requested
+        if pretrained:
+            logging.info("Loading pretrained backbone weights...")
+            pretrained_model = timm.create_model('efficientnet_b0', pretrained=True)
+            # Only load backbone weights, not the classifier
+            backbone_state_dict = {k: v for k, v in pretrained_model.state_dict().items() 
+                                 if not k.startswith('classifier')}
+            self.spatial_stream.load_state_dict(backbone_state_dict, strict=False)
+            logging.info("Pretrained backbone weights loaded")
+        else:
+            logging.info("Initializing model without pretrained weights")
+        
         # Get feature dimensions
         with torch.no_grad():
             dummy_input = torch.zeros(1, 3, 224, 224)
-            spatial_features = self.spatial_stream.forward_features(dummy_input)
-            self.spatial_dim = spatial_features.shape[1]
+            features = self.spatial_stream.forward_features(dummy_input)
+            self.feature_dim = features.shape[1]
         
-        # Frequency stream
-        self.frequency_stream = FrequencyBranch(in_channels=3)
-        
-        # Multi-scale pooling
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        # Frequency stream (simple CNN)
+        self.frequency_stream = nn.Sequential(
+            nn.Conv2d(6, 64, kernel_size=3, padding=1),  # 6 channels for real and imaginary parts
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d(1)
+        )
         
         # Feature processing
-        total_features = self.spatial_dim + 256  # spatial + frequency features
+        self.feature_norm = nn.LayerNorm(512)
+        self.feature_dropout = nn.Dropout(dropout_rate)
+        
+        # Feature reduction
         self.feature_reduction = nn.Sequential(
-            nn.Linear(total_features * 2, 512),  # *2 for concatenated pooling features
-            nn.LayerNorm(512),
+            nn.Linear(self.feature_dim + 256, 512),  # Spatial + Frequency features
             nn.GELU(),
             nn.Dropout(dropout_rate * 0.5)
         )
-        
-        # Feature normalization
-        self.feature_norm = nn.LayerNorm(512)
-        self.feature_dropout = nn.Dropout(dropout_rate)
         
         # Classifier
         self.classifier = nn.Sequential(
@@ -108,13 +94,17 @@ class TwoStreamModel(BaseModel):
             'num_classes': num_classes,
             'dropout_rate': dropout_rate,
             'label_smoothing': label_smoothing,
-            'spatial_dim': self.spatial_dim
+            'feature_dim': self.feature_dim
         }
         
     def _initialize_weights(self):
-        """Initialize the weights of added layers."""
-        for m in [self.feature_reduction, self.classifier]:
-            if isinstance(m, nn.Linear):
+        """Initialize added layers."""
+        for m in [self.frequency_stream, self.feature_reduction, self.classifier]:
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
                 nn.init.trunc_normal_(m.weight, std=0.02)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
@@ -125,17 +115,12 @@ class TwoStreamModel(BaseModel):
         spatial_features = self.spatial_stream.forward_features(x)  # [B, C]
         
         # Frequency stream
-        freq_features = self.frequency_stream(x)  # [B, C, H, W]
-        
-        # Multi-scale pooling for both streams
-        spatial_avg = self.global_pool(spatial_features.unsqueeze(-1).unsqueeze(-1)).flatten(1)
-        spatial_max = self.max_pool(spatial_features.unsqueeze(-1).unsqueeze(-1)).flatten(1)
-        
-        freq_avg = self.global_pool(freq_features).flatten(1)
-        freq_max = self.max_pool(freq_features).flatten(1)
+        ffted = fft.fft2(x, dim=(-2, -1))
+        freq_input = torch.cat([ffted.real, ffted.imag], dim=1)  # Combine real and imaginary parts
+        freq_features = self.frequency_stream(freq_input).flatten(1)  # [B, 256]
         
         # Combine features
-        combined = torch.cat([spatial_avg, spatial_max, freq_avg, freq_max], dim=1)
+        combined = torch.cat([spatial_features, freq_features], dim=1)
         
         # Feature processing
         features = self.feature_reduction(combined)
@@ -160,10 +145,15 @@ class TwoStreamModel(BaseModel):
             {'params': new_params, 'lr': 3e-4}       # Higher LR for new layers
         ]
         
-        # Use AdamW with weight decay
-        optimizer = torch.optim.AdamW(param_groups, weight_decay=0.01)
+        # Get optimizer with proper weight decay
+        optimizer = get_optimizer(
+            self,
+            optimizer_name='adamw',
+            learning_rate=1e-4,
+            weight_decay=0.01
+        )
         
-        # OneCycle scheduler
+        # Get scheduler
         scheduler = get_scheduler(
             optimizer,
             scheduler_name='onecycle',
@@ -199,4 +189,4 @@ class TwoStreamModel(BaseModel):
         parser = parent_parser.add_argument_group("TwoStream")
         parser.add_argument("--dropout_rate", type=float, default=0.3)
         parser.add_argument("--label_smoothing", type=float, default=0.1)
-        return parent_parser 
+        return parent_parser

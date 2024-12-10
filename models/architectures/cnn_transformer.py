@@ -1,33 +1,10 @@
 import torch
 import torch.nn as nn
 import timm
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Dict, Any, Tuple
 from models.base_model import BaseModel
 from utils.training import get_optimizer, get_scheduler, LabelSmoothingLoss
-
-class TransformerBlock(nn.Module):
-    def __init__(self, dim: int, num_heads: int = 8, mlp_ratio: float = 4.0, dropout: float = 0.1):
-        super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
-        self.attn = nn.MultiheadAttention(dim, num_heads, dropout=dropout)
-        self.norm2 = nn.LayerNorm(dim)
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, int(dim * mlp_ratio)),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(int(dim * mlp_ratio), dim),
-            nn.Dropout(dropout)
-        )
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Multi-head attention
-        x_norm = self.norm1(x)
-        attn_out, _ = self.attn(x_norm, x_norm, x_norm)
-        x = x + attn_out
-        
-        # MLP block
-        x = x + self.mlp(self.norm2(x))
-        return x
+import logging
 
 class CNNTransformerModel(BaseModel):
     def __init__(self,
@@ -41,48 +18,52 @@ class CNNTransformerModel(BaseModel):
         }
         super().__init__(config)
         
-        # CNN backbone (ResNet50) without classifier
-        self.cnn = timm.create_model(
+        # Load ResNet without pretrained weights initially
+        self.model = timm.create_model(
             'resnet50',
-            pretrained=pretrained,
-            num_classes=0,
-            features_only=True
+            pretrained=False,  # Always initialize without pretrained weights
+            num_classes=0,  # Remove classifier
+            drop_rate=dropout_rate
         )
+        
+        # Load pretrained weights if requested
+        if pretrained:
+            logging.info("Loading pretrained backbone weights...")
+            pretrained_model = timm.create_model('resnet50', pretrained=True)
+            # Only load backbone weights, not the classifier
+            backbone_state_dict = {k: v for k, v in pretrained_model.state_dict().items() 
+                                 if not k.startswith('fc')}
+            self.model.load_state_dict(backbone_state_dict, strict=False)
+            logging.info("Pretrained backbone weights loaded")
+        else:
+            logging.info("Initializing model without pretrained weights")
         
         # Get feature dimensions
         with torch.no_grad():
             dummy_input = torch.zeros(1, 3, 224, 224)
-            features = self.cnn(dummy_input)[-1]  # Get last layer features
+            features = self.model.forward_features(dummy_input)
             self.feature_dim = features.shape[1]
         
         # Feature processing
-        self.conv1x1 = nn.Conv2d(self.feature_dim, 512, kernel_size=1)
-        self.bn = nn.BatchNorm2d(512)
-        self.relu = nn.ReLU(inplace=True)
+        self.feature_norm = nn.LayerNorm(512)
+        self.feature_dropout = nn.Dropout(dropout_rate)
         
-        # Multi-scale pooling
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
-        
-        # Transformer blocks
-        transformer_dim = 512
-        self.pos_embed = nn.Parameter(torch.zeros(1, 196, transformer_dim))  # 14x14 feature map
-        self.transformer_blocks = nn.ModuleList([
-            TransformerBlock(transformer_dim, dropout=dropout_rate)
-            for _ in range(3)
-        ])
+        # Simple transformer layer
+        self.transformer = nn.TransformerEncoderLayer(
+            d_model=self.feature_dim,
+            nhead=8,
+            dim_feedforward=2048,
+            dropout=dropout_rate,
+            activation='gelu',
+            batch_first=True
+        )
         
         # Feature reduction
         self.feature_reduction = nn.Sequential(
-            nn.Linear(transformer_dim * 2, 512),  # *2 for concatenated pooling features
-            nn.LayerNorm(512),
+            nn.Linear(self.feature_dim, 512),
             nn.GELU(),
             nn.Dropout(dropout_rate * 0.5)
         )
-        
-        # Feature normalization
-        self.feature_norm = nn.LayerNorm(512)
-        self.feature_dropout = nn.Dropout(dropout_rate)
         
         # Classifier
         self.classifier = nn.Sequential(
@@ -111,47 +92,29 @@ class CNNTransformerModel(BaseModel):
         
     def _initialize_weights(self):
         """Initialize added layers."""
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
-        
-        for m in [self.conv1x1, self.feature_reduction, self.classifier]:
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
+        for m in [self.feature_reduction, self.classifier]:
+            if isinstance(m, nn.Linear):
                 nn.init.trunc_normal_(m.weight, std=0.02)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
                     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass combining CNN and Transformer features."""
+        """Forward pass combining CNN and Transformer."""
         # Get CNN features
-        features = self.cnn(x)[-1]  # Get last layer features
+        features = self.model.forward_features(x)  # [B, C, H, W]
         
-        # Process features
-        features = self.conv1x1(features)  # [B, C, H, W]
-        features = self.bn(features)
-        features = self.relu(features)
-        
-        # Multi-scale pooling branch
-        avg_pool = self.global_pool(features).flatten(1)  # [B, C]
-        max_pool = self.max_pool(features).flatten(1)     # [B, C]
-        pooled = torch.cat([avg_pool, max_pool], dim=1)   # [B, 2C]
-        
-        # Transformer branch
+        # Reshape for transformer
         B, C, H, W = features.shape
-        trans_features = features.flatten(2).transpose(1, 2)  # [B, HW, C]
-        trans_features = trans_features + self.pos_embed
+        features = features.view(B, C, -1).transpose(1, 2)  # [B, HW, C]
         
-        # Apply transformer blocks
-        for block in self.transformer_blocks:
-            trans_features = block(trans_features)
-            
-        # Global average pooling of transformer features
-        trans_features = trans_features.mean(dim=1)  # [B, C]
+        # Apply transformer
+        features = self.transformer(features)
+        
+        # Global average pooling
+        features = features.mean(dim=1)  # [B, C]
         
         # Feature processing
-        features = self.feature_reduction(pooled)  # Use pooled features
+        features = self.feature_reduction(features)
         features = self.feature_norm(features)
         features = self.feature_dropout(features)
         
@@ -161,25 +124,27 @@ class CNNTransformerModel(BaseModel):
     def configure_optimizers(self) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
         """Configure optimizer with layer-wise learning rates."""
         # Group parameters
-        cnn_params = list(self.cnn.parameters())
-        transformer_params = list(self.transformer_blocks.parameters()) + \
-                           [self.pos_embed]
-        new_params = list(self.conv1x1.parameters()) + \
-                    list(self.bn.parameters()) + \
-                    list(self.feature_reduction.parameters()) + \
+        backbone_params = list(self.model.parameters())
+        transformer_params = list(self.transformer.parameters())
+        new_params = list(self.feature_reduction.parameters()) + \
                     list(self.classifier.parameters()) + \
                     list(self.feature_norm.parameters())
                     
         param_groups = [
-            {'params': cnn_params, 'lr': 1e-4},        # Lower LR for pretrained CNN
-            {'params': transformer_params, 'lr': 3e-4}, # Higher LR for transformer
-            {'params': new_params, 'lr': 3e-4}         # Higher LR for new layers
+            {'params': backbone_params, 'lr': 1e-4},        # Lower LR for pretrained
+            {'params': transformer_params, 'lr': 3e-4},     # Higher LR for transformer
+            {'params': new_params, 'lr': 3e-4}             # Higher LR for new layers
         ]
         
-        # Use AdamW with weight decay
-        optimizer = torch.optim.AdamW(param_groups, weight_decay=0.01)
+        # Get optimizer with proper weight decay
+        optimizer = get_optimizer(
+            self,
+            optimizer_name='adamw',
+            learning_rate=1e-4,
+            weight_decay=0.01
+        )
         
-        # OneCycle scheduler
+        # Get scheduler
         scheduler = get_scheduler(
             optimizer,
             scheduler_name='onecycle',
